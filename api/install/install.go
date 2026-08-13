@@ -23,14 +23,7 @@ func InstallCRDAPIs(scheme *runtime.Scheme) *runtime.Scheme {
 func InstallOperatorAPIsPlatform(scheme *runtime.Scheme) *runtime.Scheme {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(clustersv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme)) // required for config resource
-
-	return scheme
-}
-
-func InstallOperatorAPIsOnboarding(scheme *runtime.Scheme) *runtime.Scheme {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme)) // required for usage resource
+	utilruntime.Must(v1alpha1.AddToScheme(scheme)) // required for Replica resource
 
 	return scheme
 }

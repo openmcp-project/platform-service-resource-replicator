@@ -1,0 +1,144 @@
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+
+	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
+)
+
+// Matches returns true if the given namespace matches the selector.
+// If the selector is nil or empty, all namespaces match.
+func (s *NamespaceSelector) Matches(ns *corev1.Namespace) (bool, error) {
+	if s.Empty() {
+		return true, nil
+	}
+	if s.MatchIdentities != nil {
+		for _, id := range s.MatchIdentities {
+			if id.Name == ns.Name {
+				return true, nil
+			}
+		}
+		return false, nil
+	} else {
+		sel, err := metav1.LabelSelectorAsSelector(&s.LabelSelector)
+		if err != nil {
+			return false, err
+		}
+		return sel.Matches(labels.Set(ns.Labels)), nil
+	}
+}
+
+// Empty returns true if the selector is nil or empty (matches all namespaces).
+func (s *NamespaceSelector) Empty() bool {
+	if s == nil {
+		return true
+	}
+	return s.MatchIdentities == nil && s.MatchLabels == nil && len(s.MatchExpressions) == 0
+}
+
+// AddRaw adds a new created resource to the list, if it is not already present.
+func (cr *CreatedResourcesWithType) AddRaw(namespace, name string, cluster *commonapi.ObjectReference) {
+	cr.Add(CreatedResource{
+		Cluster: cluster,
+		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
+			Name:      name,
+			Namespace: namespace,
+		},
+	})
+}
+
+// Add adds a new created resource to the list, if it is not already present.
+func (cr *CreatedResourcesWithType) Add(res CreatedResource) {
+	for _, existing := range cr.Resources {
+		if existing.Name == res.Name && existing.Namespace == res.Namespace && ((existing.Cluster == nil && res.Cluster == nil) || (existing.Cluster != nil && res.Cluster != nil && existing.Cluster.Name == res.Cluster.Name && existing.Cluster.Namespace == res.Cluster.Namespace)) {
+			// Already present
+			return
+		}
+	}
+	cr.Resources = append(cr.Resources, res)
+}
+
+// RemoveRaw removes a created resource from the list, if it is present.
+func (cr *CreatedResourcesWithType) RemoveRaw(namespace, name string, cluster *commonapi.ObjectReference) {
+	cr.Remove(CreatedResource{
+		Cluster: cluster,
+		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
+			Name:      name,
+			Namespace: namespace,
+		},
+	})
+}
+
+// Remove removes a created resource from the list, if it is present.
+func (cr *CreatedResourcesWithType) Remove(c CreatedResource) {
+	for i, existing := range cr.Resources {
+		if existing.Name == c.Name && existing.Namespace == c.Namespace && ((existing.Cluster == nil && c.Cluster == nil) || (existing.Cluster != nil && c.Cluster != nil && existing.Cluster.Name == c.Cluster.Name && existing.Cluster.Namespace == c.Cluster.Namespace)) {
+			// Found, remove it
+			cr.Resources = append(cr.Resources[:i], cr.Resources[i+1:]...)
+			return
+		}
+	}
+}
+
+// AddRaw adds a created resource of the given type to the list, if it is not already present.
+func (l *CreatedResourcesWithTypeList) AddRaw(gvk metav1.GroupVersionKind, namespace, name string, cluster *commonapi.ObjectReference) {
+	l.Add(gvk, CreatedResource{
+		Cluster: cluster,
+		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
+			Name:      name,
+			Namespace: namespace,
+		},
+	})
+}
+
+// Add adds a created resource of the given type to the list, if it is not already present.
+func (l *CreatedResourcesWithTypeList) Add(gvk metav1.GroupVersionKind, res CreatedResource) {
+	for i := range *l {
+		if (*l)[i].Type == gvk {
+			(*l)[i].Add(res)
+			return
+		}
+	}
+	*l = append(*l, CreatedResourcesWithType{
+		Type:      gvk,
+		Resources: []CreatedResource{res},
+	})
+}
+
+// RemoveRaw removes a created resource of the given type from the list, if it is present.
+func (l *CreatedResourcesWithTypeList) RemoveRaw(gvk metav1.GroupVersionKind, namespace, name string, cluster *commonapi.ObjectReference) {
+	l.Remove(gvk, CreatedResource{
+		Cluster: cluster,
+		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
+			Name:      name,
+			Namespace: namespace,
+		},
+	})
+}
+
+// Remove removes a created resource of the given type from the list, if it is present.
+func (l *CreatedResourcesWithTypeList) Remove(gvk metav1.GroupVersionKind, res CreatedResource) {
+	for i := range *l {
+		if (*l)[i].Type == gvk {
+			(*l)[i].Remove(res)
+			return
+		}
+	}
+}
+
+// Contains returns true if the list contains the given created resource of the given type.
+func (l CreatedResourcesWithTypeList) Contains(gvk metav1.GroupVersionKind, res CreatedResource) bool {
+	for i := range l {
+		if l[i].Type == gvk {
+			for _, existing := range l[i].Resources {
+				if existing.Name == res.Name && existing.Namespace == res.Namespace && ((existing.Cluster == nil && res.Cluster == nil) || (existing.Cluster != nil && res.Cluster != nil && existing.Cluster.Name == res.Cluster.Name && existing.Cluster.Namespace == res.Cluster.Namespace)) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
+}
