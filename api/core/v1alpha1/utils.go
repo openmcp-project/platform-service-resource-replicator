@@ -40,7 +40,11 @@ func (s *NamespaceSelector) Empty() bool {
 }
 
 // AddRaw adds a new created resource to the list, if it is not already present.
+// An empty cluster reference is treated as nil, as it is the same as the hosting platform cluster.
 func (cr *CreatedResourcesWithType) AddRaw(namespace, name string, cluster *commonapi.ObjectReference) {
+	if cluster != nil && cluster.Namespace == "" && cluster.Name == "" {
+		cluster = nil
+	}
 	cr.Add(CreatedResource{
 		Cluster: cluster,
 		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
@@ -62,7 +66,11 @@ func (cr *CreatedResourcesWithType) Add(res CreatedResource) {
 }
 
 // RemoveRaw removes a created resource from the list, if it is present.
+// An empty cluster reference is treated as nil, as it is the same as the hosting platform cluster.
 func (cr *CreatedResourcesWithType) RemoveRaw(namespace, name string, cluster *commonapi.ObjectReference) {
+	if cluster != nil && cluster.Namespace == "" && cluster.Name == "" {
+		cluster = nil
+	}
 	cr.Remove(CreatedResource{
 		Cluster: cluster,
 		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
@@ -74,6 +82,9 @@ func (cr *CreatedResourcesWithType) RemoveRaw(namespace, name string, cluster *c
 
 // Remove removes a created resource from the list, if it is present.
 func (cr *CreatedResourcesWithType) Remove(c CreatedResource) {
+	if cr == nil {
+		return
+	}
 	for i, existing := range cr.Resources {
 		if existing.Name == c.Name && existing.Namespace == c.Namespace && ((existing.Cluster == nil && c.Cluster == nil) || (existing.Cluster != nil && c.Cluster != nil && existing.Cluster.Name == c.Cluster.Name && existing.Cluster.Namespace == c.Cluster.Namespace)) {
 			// Found, remove it
@@ -84,7 +95,11 @@ func (cr *CreatedResourcesWithType) Remove(c CreatedResource) {
 }
 
 // AddRaw adds a created resource of the given type to the list, if it is not already present.
+// An empty cluster reference is treated as nil, as it is the same as the hosting platform cluster.
 func (l *CreatedResourcesWithTypeList) AddRaw(gvk metav1.GroupVersionKind, namespace, name string, cluster *commonapi.ObjectReference) {
+	if cluster != nil && cluster.Namespace == "" && cluster.Name == "" {
+		cluster = nil
+	}
 	l.Add(gvk, CreatedResource{
 		Cluster: cluster,
 		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
@@ -109,7 +124,11 @@ func (l *CreatedResourcesWithTypeList) Add(gvk metav1.GroupVersionKind, res Crea
 }
 
 // RemoveRaw removes a created resource of the given type from the list, if it is present.
+// An empty cluster reference is treated as nil, as it is the same as the hosting platform cluster.
 func (l *CreatedResourcesWithTypeList) RemoveRaw(gvk metav1.GroupVersionKind, namespace, name string, cluster *commonapi.ObjectReference) {
+	if cluster != nil && cluster.Namespace == "" && cluster.Name == "" {
+		cluster = nil
+	}
 	l.Remove(gvk, CreatedResource{
 		Cluster: cluster,
 		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
@@ -127,6 +146,21 @@ func (l *CreatedResourcesWithTypeList) Remove(gvk metav1.GroupVersionKind, res C
 			return
 		}
 	}
+}
+
+// ContainsRaw returns true if the list contains the given created resource of the given type.
+// An empty cluster reference is treated as nil, as it is the same as the hosting platform cluster.
+func (l CreatedResourcesWithTypeList) ContainsRaw(gvk metav1.GroupVersionKind, namespace, name string, cluster *commonapi.ObjectReference) bool {
+	if cluster != nil && cluster.Namespace == "" && cluster.Name == "" {
+		cluster = nil
+	}
+	return l.Contains(gvk, CreatedResource{
+		Cluster: cluster,
+		ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{
+			Name:      name,
+			Namespace: namespace,
+		},
+	})
 }
 
 // Contains returns true if the list contains the given created resource of the given type.

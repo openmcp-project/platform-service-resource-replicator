@@ -26,6 +26,8 @@ const (
 	ReasonTargetConflict = "TargetConflict"
 	// ReasonMissingNamespace indicates that the controller tried to create a target resource in a namespace that does not exist and cannot be created.
 	ReasonMissingNamespace = "MissingNamespace"
+	// ReasonNamespaceInDeletion indicates that a namespace where resources are to be created in is being deleted.
+	ReasonNamespaceInDeletion = "NamespaceInDeletion"
 
 	// ConditionTypeSourcePrefix is the prefix for source-specific conditions
 	ConditionTypeSourcePrefix = "Source_"
