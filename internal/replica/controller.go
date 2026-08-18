@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	gotmpl "text/template"
+	"time"
 
 	"github.com/Masterminds/sprig/v3"
 	corev1 "k8s.io/api/core/v1"
@@ -36,7 +37,8 @@ import (
 const (
 	ControllerName = "Replica"
 
-	HostingPlatformClusterNameForLogging = "<hosting-platform-cluster>"
+	HostingPlatformClusterNameForLogging       = "<hosting-platform-cluster>"
+	WaitingForReplicaDeletionReconcileInterval = 1 * time.Minute
 )
 
 type ReplicaController struct {
@@ -148,6 +150,11 @@ func (c *ReplicaController) reconcile(ctx context.Context, req reconcile.Request
 		}
 	}
 
+	if rr.Result.RequeueAfter > 0 && len(rr.Object.GetStatus().Replicas) == 0 {
+		// The only reason for requeueing is waiting for the deletion of all managed resources, so if we know that all are gone, we can skip the waiting time and requeue immediately.
+		rr.Result.RequeueAfter = 1
+	}
+
 	return rr
 }
 
@@ -158,14 +165,14 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, rr Reconci
 	createCon := ctrlutils.GenerateCreateConditionFunc(&rr)
 
 	// ensure finalizer on (Cluster)Replica
-	old := rr.Object.DeepCopyReplicaEquivalent()
 	if controllerutil.AddFinalizer(rr.Object, repv1alpha1.ReplicaFinalizer) {
 		log.Info("Adding finalizer to (Cluster)Replica")
-		if err := c.platformClient.Patch(ctx, rr.Object, client.MergeFrom(old)); err != nil {
+		if err := c.platformClient.Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to add finalizer to (Cluster)Replica '%s': %w", rr.Object.NamespacedName(), err), cconst.ReasonPlatformClusterInteractionProblem)
 			createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
 			return rr, nil
 		}
+		rr.OldObject = rr.Object.DeepCopyReplicaEquivalent()
 	}
 
 	// parse template
@@ -537,15 +544,46 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, rr Reconci
 }
 
 func (c *ReplicaController) handleDelete(ctx context.Context, rr ReconcileResult) ReconcileResult {
+	log := logging.FromContextOrPanic(ctx)
+	log.Debug("Handling deletion")
+
+	createCon := ctrlutils.GenerateCreateConditionFunc(&rr)
+
+	if len(rr.Object.GetStatus().Replicas) > 0 {
+		// Not returning an error leads to deleteObsoleteResources being called in a way which deletes all managed resources, so we don't really need to do anything here.
+		log.Info("Waiting for managed replicas to be deleted", "count", len(rr.Object.GetStatus().Replicas))
+		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, repv1alpha1.ConditionReasonWaitingForManagedReplicasDeletion, "Waiting for managed replicas to be deleted")
+		rr.Result.RequeueAfter = WaitingForReplicaDeletionReconcileInterval
+		return rr
+	}
+
+	// remove finalizer
+	if controllerutil.RemoveFinalizer(rr.Object, repv1alpha1.ReplicaFinalizer) {
+		log.Info("Removing finalizer from (Cluster)Replica")
+		if err := c.platformClient.Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to remove finalizer from (Cluster)Replica '%s': %w", rr.Object.NamespacedName(), err), cconst.ReasonPlatformClusterInteractionProblem)
+			createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
+			return rr
+		}
+	}
+
+	// unset the Object to prevent status updates, because the resource could already be gone by now
+	rr.Object = nil
+	rr.OldObject = nil
 
 	return rr
 }
 
 // deleteObsoleteResources deletes resources that are no longer managed by the (Cluster)Replica.
-// No-op if the managedResources map is nil, which indicates that an error occurred before the managed resources could be determined.
+// No-op if the managedResources map is nil, which indicates that an error occurred before the managed resources could be determined,
+// or if the Object is nil, which indicates that the finalizer has been removed and the (Cluster)Replica is probably already gone.
 func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, rr ReconcileResult, managedResources map[commonapi.ObjectReference][]client.Object) ReconcileResult {
 	log := logging.FromContextOrPanic(ctx)
 
+	if rr.Object == nil {
+		log.Debug("Skipping obsolete resource deletion, because the (Cluster)Replica is deleted (probably)")
+		return rr
+	}
 	if managedResources == nil {
 		log.Debug("Skipping obsolete resource deletion because the currently managed resources could not be determined")
 		return rr

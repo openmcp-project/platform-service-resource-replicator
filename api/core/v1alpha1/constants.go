@@ -45,4 +45,6 @@ const (
 	ConditionReasonTargetSkipped = "TargetSkipped"
 	// ConditionReasonTargetSynced indicates that the corresponding target resource was successfully created or updated.
 	ConditionReasonTargetSynced = "TargetSynced"
+	// ConditionReasonWaitingForManagedReplicasDeletion indicates that the controller is waiting for managed replicas to be deleted before it can proceed with deletion of the (Cluster)Replica.
+	ConditionReasonWaitingForManagedReplicasDeletion = "WaitingForManagedReplicasDeletion"
 )
