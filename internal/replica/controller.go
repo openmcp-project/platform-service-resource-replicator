@@ -1,3 +1,4 @@
+// nolint:gocyclo
 package replica
 
 import (
@@ -719,6 +720,7 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, rr Reco
 	return rr
 }
 
+// nolint:errcheck // Wrongfully returns linting errors here, because the builder methods return the receiver for chaining, which happens to implement the error interface, and the linter doesn't like returned errors being ignored.
 func wrapTemplateError(err error, template string, input map[string]any, output string) error {
 	bld := errutils.TemplateErrorBuilder(err)
 	if template != "" {
