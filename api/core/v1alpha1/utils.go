@@ -4,6 +4,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
 )
@@ -141,4 +142,21 @@ func (l CreatedResourcesWithTypeList) Contains(gvk metav1.GroupVersionKind, res 
 		}
 	}
 	return false
+}
+
+// +kubebuilder:object:generate=false
+type ReplicaEquivalent interface {
+	client.Object
+
+	// GetSpec returns a pointer to the replica's spec.
+	GetSpec() *ReplicaSpec
+	// GetStatus returns a pointer to the replica's status.
+	GetStatus() *ReplicaStatus
+	// ReplicaKind returns the kind of the replica (either "Replica" or "ClusterReplica").
+	ReplicaKind() string
+	// DeepCopyReplicaEquivalent returns a deep copy of the replica.
+	DeepCopyReplicaEquivalent() ReplicaEquivalent
+	// NamespacedName returns a string containing namespace (in case of Replica) and name of the replica.
+	// Format is '<namespace/name>' for Replica and '<name>' for ClusterReplica.
+	NamespacedName() string
 }

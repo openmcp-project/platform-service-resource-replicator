@@ -62,7 +62,7 @@ type ReplicaSpec struct {
 	//     - name: Name of the Cluster resource.
 	//     - namespace: Namespace of the Cluster resource.
 	//     - purpose: spec.purpose of the Cluster resource.
-	//   - namespace: Namespace of the target resource.
+	//   - namespace: Namespace of the target resource. Only available if a namespace selector is specified in the target definition; not set if the namespace is computed by the template itself.
 	// - replica: Metadata information about this Replica resource. Contains fields for name, namespace, labels, and annotations.
 	//
 	// +optional
@@ -97,6 +97,52 @@ type TargetDefinition struct {
 	// If omitted, the namespace must be specified in the template (except for the 'only one source, no template' case).
 	// +optional
 	Namespace *NamespaceTargetDefinition `json:"namespace,omitempty"`
+
+	// TargetConflictPolicy specifies what to do if the target resource already exists.
+	// Valid values are:
+	// - Overwrite
+	//     The existing target resource will be 'taken over' by the replica.
+	//     It will be overwritten and the replica will be responsible for it from then on.
+	//     Note that this policy still returns an error if the existing target resource is managed by another (Cluster)Replica, which still exists.
+	// - Skip
+	//     The existing resource will remain unchanged and the replica will not be created.
+	//     The skip will be visible in the conditions, but the Replica will still be considered healthy.
+	// - Fail (default)
+	//     The existing resource will remain unchanged and the replica will not be created.
+	//     The reconciliation returns an error, which is also reflected in the conditions.
+	//     This causes the Replica to not become healthy unless the conflicting resource is removed.
+	// +kubebuilder:validation:Enum=Overwrite;Skip;Fail
+	// +optional
+	TargetConflictPolicy *TargetConflictPolicy `json:"targetConflictPolicy,omitempty"`
+
+	// NamespacePolicy specifies what to do if the target namespace does not exist.
+	// Has no effect if the rendered template results in a cluster-scoped resource.
+	// Valid values are:
+	// - Create (default)
+	//     The target namespace will be created if it does not exist.
+	// - Skip
+	//     The target namespace will be skipped and the replica will not be created.
+	//     The skip will be visible in the conditions, but the Replica will still be considered healthy.
+	// - Fail
+	//     The reconciliation returns an error, which is also reflected in the conditions.
+	//     This causes the Replica to not become healthy unless the target namespace is created.
+	// +kubebuilder:validation:Enum=Create;Skip;Fail
+	// +optional
+	NamespacePolicy *NamespacePolicy `json:"namespacePolicy,omitempty"`
+}
+
+func (td *TargetDefinition) GetTargetConflictPolicy() TargetConflictPolicy {
+	if td.TargetConflictPolicy == nil {
+		return TargetConflictPolicyFail
+	}
+	return *td.TargetConflictPolicy
+}
+
+func (td *TargetDefinition) GetNamespacePolicy() NamespacePolicy {
+	if td.NamespacePolicy == nil {
+		return NamespacePolicyCreate
+	}
+	return *td.NamespacePolicy
 }
 
 type ClusterTargetDefinition struct {
@@ -179,6 +225,8 @@ type ReplicaStatus struct {
 // +kubebuilder:resource:shortName=rep
 // +kubebuilder:metadata:labels="openmcp.cloud/cluster=platform"
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:JSONPath=`.status.phase`,name="Phase",type=string
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 type Replica struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -196,4 +244,26 @@ type ReplicaList struct {
 
 func init() {
 	RegisterToSchemeBuilder(&Replica{}, &ReplicaList{})
+}
+
+var _ ReplicaEquivalent = &Replica{}
+
+func (r *Replica) GetSpec() *ReplicaSpec {
+	return &r.Spec
+}
+
+func (r *Replica) GetStatus() *ReplicaStatus {
+	return &r.Status
+}
+
+func (r *Replica) ReplicaKind() string {
+	return KindReplica
+}
+
+func (r *Replica) DeepCopyReplicaEquivalent() ReplicaEquivalent {
+	return r.DeepCopy()
+}
+
+func (r *Replica) NamespacedName() string {
+	return r.Namespace + "/" + r.Name
 }

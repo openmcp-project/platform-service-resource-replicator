@@ -6,21 +6,22 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.20.1
   labels:
     openmcp.cloud/cluster: platform
-  name: replicas.core.open-control-plane.io
+  name: clusterreplicas.core.open-control-plane.io
 spec:
   group: core.open-control-plane.io
   names:
-    kind: Replica
-    listKind: ReplicaList
-    plural: replicas
+    kind: ClusterReplica
+    listKind: ClusterReplicaList
+    plural: clusterreplicas
     shortNames:
-    - rep
-    singular: replica
-  scope: Namespaced
+    - clusterrep
+    - crep
+    singular: clusterreplica
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .metadata.annotations.replica\.core\.open-control-plane\.io/target-kind
+      name: Target-Kind
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
