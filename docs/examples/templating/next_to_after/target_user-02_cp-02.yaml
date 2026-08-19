@@ -1,0 +1,10 @@
+# Cluster: platform
+# Namespace: user-02 (same namespace as Cluster resource 'user-02/cp-02')
+apiVersion: v1
+kind: Secret
+metadata:
+  name: imagepull-cp-02
+  namespace: user-02
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: eyJhdXRocyI6eyJnaGNyLmlvIjp7ImF1dGgiOiJzb21lYXV0aHRva2VuIn19fQ==

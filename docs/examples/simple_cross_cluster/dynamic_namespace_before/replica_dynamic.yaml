@@ -1,0 +1,26 @@
+# Cluster: platform
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: simple
+  namespace: test-01
+spec:
+  sources:
+  - id: source
+    group: ""
+    version: v1
+    kind: Secret
+    name: cryptic
+    namespace: foo
+  targets:
+  - cluster:
+      selector:
+        matchPurposes:
+        - operator: ContainsAll
+          values:
+          - workload
+    namespace:
+      selector:
+        matchExpressions:
+        - key: foo.bar.baz/target
+          operator: Exists

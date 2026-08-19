@@ -1,0 +1,49 @@
+# Cluster: platform
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: combined-secret
+  namespace: test-01
+spec:
+  sources:
+  - id: db
+    group: ""
+    version: v1
+    kind: Secret
+    name: db-credentials
+    namespace: infra
+  - id: tls
+    group: ""
+    version: v1
+    kind: Secret
+    name: tls-cert
+    namespace: infra
+  template: |
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: combined
+      namespace: test-01
+    type: Opaque
+    data:
+      password: {{ index .sources.db.data "password" }}
+      {{- range $key, $value := .sources.tls.data }}
+      {{ $key }}: {{ $value }}
+      {{- end }}
+  targets:
+  - namespace:
+      selector:
+        matchIdentities:
+        - name: test-01
+status:
+  phase: Ready
+  observedGeneration: 1
+  conditions: [] # redacted
+  replicas:
+  - type:
+      group: ""
+      version: v1
+      kind: Secret
+    resources:
+    - name: combined
+      namespace: test-01

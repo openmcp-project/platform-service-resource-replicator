@@ -1,0 +1,30 @@
+# Cluster: platform
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: imagepull-next-to
+  namespace: test-01
+spec:
+  sources:
+  - id: source
+    group: ""
+    version: v1
+    kind: Secret
+    name: imagepull
+    namespace: registry
+  template:
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: "imagepull-{{ .target.cluster.name }}"
+    type: "{{ .sources.source.type }}"
+    data:
+      .dockerconfigjson: "{{ index .sources.source.data \".dockerconfigjson\" }}"
+  targets:
+  - cluster:
+      selector:
+        matchPurposes:
+        - operator: ContainsAll
+          values:
+          - controlplane
+      location: NextTo

@@ -3,6 +3,9 @@
 
 ## Examples
 
+- [Simple Examples](examples/simple.md)
+- [Simple Cross-Cluster Examples](examples/simple_cross_cluster.md)
+- [Templating Examples](examples/templating.md)
 
 ## Usage
 

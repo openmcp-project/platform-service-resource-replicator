@@ -47,7 +47,6 @@ tasks:
       example_dirs:
         sh: '{{.ROOT_DIR}}/hack/common/unfold.sh --clean --inline {{.ROOT_DIR}}/docs/examples/...'
     cmds:
-    - cmd: echo '{{.example_dirs}}'
     - cmd: go run {{.ROOT_DIR}}/hack/embed-docs {{.example_dirs}}
 
   platformservice:

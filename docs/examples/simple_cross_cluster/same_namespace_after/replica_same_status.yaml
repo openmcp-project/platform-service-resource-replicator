@@ -1,0 +1,42 @@
+# Cluster: platform
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: simple
+  namespace: test-01
+spec:
+  sources:
+  - id: source
+    group: ""
+    version: v1
+    kind: Secret
+    name: cryptic
+    namespace: foo
+  targets:
+  - cluster:
+      selector:
+        matchPurposes:
+        - operator: ContainsAll
+          values:
+          - workload
+status:
+  phase: Ready
+  observedGeneration: 1
+  conditions: [] # redacted
+  replicas:
+  - type:
+      group: ""
+      version: v1
+      kind: Secret
+    resources:
+    - cluster:
+        name: wl-01
+        namespace: workloads
+      name: cryptic
+      namespace: foo
+    - cluster:
+        name: wl-02
+        namespace: workloads
+      name: cryptic
+      namespace: foo
+      

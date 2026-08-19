@@ -1,0 +1,9 @@
+# Cluster: platform
+apiVersion: v1
+kind: Secret
+metadata:
+  name: imagepull
+  namespace: registry
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: eyJhdXRocyI6eyJnaGNyLmlvIjp7ImF1dGgiOiJzb21lYXV0aHRva2VuIn19fQ==
