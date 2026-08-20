@@ -9,4 +9,6 @@
 
 ## Usage
 
+- [What does the Resource Replicator do?](usage/purpose.md)
+- [The (Cluster)Replica Resource](usage/replica.md)
 

@@ -1,4 +1,14 @@
-# OpenControlPlane Repository Template
+# Platform Service: Resource Replicator
+
+## About the Project
+
+This repository implements a 'platform service' in the context of the [open-control-plane](open-control-plane.io) project.
+
+It reconciles `Replica` resources, as well as their cluster-scoped siblings, `ClusterReplica`s. Both specify a k8s resource which should be copied into one or more namespaces, on the same cluster and/or on other clusters.
+
+Templating allows for powerful modifications, such as changing the copied resource's `kind`, or combining multiple sources into a single one.
+
+See the [documentation](./docs/README.md) for further details.
 
 ## Support, Feedback, Contributing
 

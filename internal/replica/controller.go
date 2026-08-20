@@ -335,7 +335,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 						targetData["cluster"] = map[string]any{
 							"name":      targetCluster.Name,
 							"namespace": targetCluster.Namespace,
-							"purpose":   targetCluster.Spec.Purposes,
+							"purposes":  targetCluster.Spec.Purposes,
 						}
 					} else {
 						targetData["cluster"] = map[string]any{}

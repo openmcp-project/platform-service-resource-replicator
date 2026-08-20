@@ -361,7 +361,7 @@ spec:
                     - cluster: Information about the cluster the target resource is being rendered for. Can be empty, in which case the platform cluster is targeted. It contains the following fields:
                       - name: Name of the Cluster resource.
                       - namespace: Namespace of the Cluster resource.
-                      - purpose: spec.purpose of the Cluster resource.
+                      - purposes: spec.purposes of the Cluster resource.
                     - namespace: Namespace of the target resource. Only available if a namespace selector is specified in the target definition; not set if the namespace is computed by the template itself.
                   - replica: Metadata information about this Replica resource. Contains fields for name, namespace, labels, and annotations.
                 type: string
