@@ -95,7 +95,7 @@ func (c *ClusterHandler) enqueueAllReplicasForCluster(ctx context.Context, platf
 					} else {
 						log.Debug("Enqueuing Replica", "replica", fmt.Sprintf("%s/%s", rep.GetNamespace(), rep.GetName()), "causingCopy", fmt.Sprintf("[%s]%s/%s", copyWithType.Type.String(), copy.Namespace, copy.Name))
 					}
-					shared.SharedInformation().EnqueueReplica(rep.GetNamespace(), rep.GetName())
+					shared.SharedInformation().EnqueueReplica(rep)
 					enqueued = true
 					break
 				}

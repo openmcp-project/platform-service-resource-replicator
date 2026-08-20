@@ -39,9 +39,9 @@ const (
 )
 
 type fileResult struct {
-	File    string `json:"file"`
-	Status  status `json:"status"`
-	Error   string `json:"error,omitempty"`
+	File   string `json:"file"`
+	Status status `json:"status"`
+	Error  string `json:"error,omitempty"`
 }
 
 type output struct {

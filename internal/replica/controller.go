@@ -16,10 +16,20 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
+	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
+	mchandler "sigs.k8s.io/multicluster-runtime/pkg/handler"
+	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
+	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
 	"github.com/openmcp-project/controller-utils/pkg/conditions"
@@ -33,6 +43,7 @@ import (
 	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
 
 	repv1alpha1 "github.com/openmcp-project/platform-service-resource-replicator/api/core/v1alpha1"
+	"github.com/openmcp-project/platform-service-resource-replicator/internal/shared"
 )
 
 const (
@@ -42,24 +53,36 @@ const (
 	WaitingForReplicaDeletionReconcileInterval = 1 * time.Minute
 )
 
-type ReplicaController struct {
-	platformClient client.Client
-	provider       multicluster.Provider
-	providerName   string
-	eventRecorder  events.EventRecorder
+func NewReplicaController(provider multicluster.Provider, providerName string, eventRecorder events.EventRecorder) *ReplicaController {
+	return &ReplicaController{
+		provider:      provider,
+		providerName:  providerName,
+		eventRecorder: eventRecorder,
+	}
 }
 
-var _ reconcile.Reconciler = &ReplicaController{}
+type ReplicaController struct {
+	provider      multicluster.Provider
+	providerName  string
+	eventRecorder events.EventRecorder
+}
+
+var _ mcreconcile.Reconciler = &ReplicaController{}
 
 type ReconcileResult = ctrlutils.ReconcileResult[repv1alpha1.ReplicaEquivalent]
 
 // Reconcile implements [reconcile.TypedReconciler].
-func (c *ReplicaController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Request) (reconcile.Result, error) {
 	log := logging.FromContextOrPanic(ctx).WithName(ControllerName)
 	ctx = logging.NewContext(ctx, log)
 	log.Info("Starting reconcile")
 
-	rr := c.reconcile(ctx, req)
+	platformCluster, err := c.provider.Get(ctx, req.ClusterName)
+	if err != nil {
+		return reconcile.Result{}, errutils.WithReason(fmt.Errorf("unable to get access to platform cluster '%s': %w", req.ClusterName, err), provider.ReasonClusterAccessError)
+	}
+
+	rr := c.reconcile(ctx, req, platformCluster)
 
 	res, err := ctrlutils.NewOpenMCPStatusUpdaterBuilder[repv1alpha1.ReplicaEquivalent]().
 		WithNestedStruct("Status").
@@ -77,12 +100,12 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req reconcile.Request
 			return commonapi.StatusPhaseReady, nil
 		}).
 		Build().
-		UpdateStatus(ctx, c.platformClient, rr)
+		UpdateStatus(ctx, platformCluster.GetClient(), rr)
 
 	return res, err
 }
 
-func (c *ReplicaController) reconcile(ctx context.Context, req reconcile.Request) ReconcileResult {
+func (c *ReplicaController) reconcile(ctx context.Context, req mcreconcile.Request, platformCluster cluster.Cluster) ReconcileResult {
 	log := logging.FromContextOrPanic(ctx)
 
 	rr := ReconcileResult{}
@@ -94,7 +117,7 @@ func (c *ReplicaController) reconcile(ctx context.Context, req reconcile.Request
 	} else {
 		rep = &repv1alpha1.ClusterReplica{}
 	}
-	if err := c.platformClient.Get(ctx, req.NamespacedName, rep); err != nil {
+	if err := platformCluster.GetClient().Get(ctx, req.NamespacedName, rep); err != nil {
 		if !apierrors.IsNotFound(err) {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error fetching resource: %w", err), cconst.ReasonPlatformClusterInteractionProblem)
 			return rr
@@ -115,7 +138,7 @@ func (c *ReplicaController) reconcile(ctx context.Context, req reconcile.Request
 				return rr
 			case openmcpconst.OperationAnnotationValueReconcile:
 				log.Debug("Removing reconcile operation annotation from resource")
-				if err := ctrlutils.EnsureAnnotation(ctx, c.platformClient, rep, openmcpconst.OperationAnnotation, "", true, ctrlutils.DELETE); err != nil {
+				if err := ctrlutils.EnsureAnnotation(ctx, platformCluster.GetClient(), rep, openmcpconst.OperationAnnotation, "", true, ctrlutils.DELETE); err != nil {
 					rr.ReconcileError = errutils.WithReason(fmt.Errorf("error removing operation annotation: %w", err), cconst.ReasonPlatformClusterInteractionProblem)
 					return rr
 				}
@@ -132,9 +155,9 @@ func (c *ReplicaController) reconcile(ctx context.Context, req reconcile.Request
 
 	var managedResources map[commonapi.ObjectReference][]client.Object
 	if rep.GetDeletionTimestamp().IsZero() {
-		rr, managedResources = c.handleCreateOrUpdate(ctx, rr)
+		rr, managedResources = c.handleCreateOrUpdate(ctx, platformCluster, rr)
 	} else {
-		rr = c.handleDelete(ctx, rr)
+		rr = c.handleDelete(ctx, platformCluster, rr)
 		if rr.ReconcileError == nil {
 			// assign an empty map to indicate that no resources are managed anymore, so that the deletion of all managed resources is triggered
 			managedResources = map[commonapi.ObjectReference][]client.Object{}
@@ -159,7 +182,7 @@ func (c *ReplicaController) reconcile(ctx context.Context, req reconcile.Request
 	return rr
 }
 
-func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, rr ReconcileResult) (ReconcileResult, map[commonapi.ObjectReference][]client.Object) {
+func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCluster cluster.Cluster, rr ReconcileResult) (ReconcileResult, map[commonapi.ObjectReference][]client.Object) {
 	log := logging.FromContextOrPanic(ctx)
 	log.Debug("Handling creation/update")
 
@@ -168,7 +191,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, rr Reconci
 	// ensure finalizer on (Cluster)Replica
 	if controllerutil.AddFinalizer(rr.Object, repv1alpha1.ReplicaFinalizer) {
 		log.Info("Adding finalizer to (Cluster)Replica")
-		if err := c.platformClient.Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
+		if err := platformCluster.GetClient().Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to add finalizer to (Cluster)Replica '%s': %w", rr.Object.NamespacedName(), err), cconst.ReasonPlatformClusterInteractionProblem)
 			createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
 			return rr, nil
@@ -196,7 +219,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, rr Reconci
 		})
 		obj.SetName(src.Name)
 		obj.SetNamespace(src.Namespace)
-		if err := c.platformClient.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+		if err := platformCluster.GetClient().Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to fetch source resource '%s' (id: %s): %w", namespacedName(obj), src.ID, err), cconst.ReasonPlatformClusterInteractionProblem)
 			createCon(SourceCondition(src.TypedObjectReference), metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
 			return rr, nil
@@ -207,7 +230,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, rr Reconci
 
 	// list Cluster resources
 	clusterList := &clustersv1alpha1.ClusterList{}
-	if err := c.platformClient.List(ctx, clusterList); err != nil {
+	if err := platformCluster.GetClient().List(ctx, clusterList); err != nil {
 		rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to list Cluster resources: %w", err), cconst.ReasonPlatformClusterInteractionProblem)
 		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
 		return rr, nil
@@ -492,7 +515,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, rr Reconci
 				if !trackedInStatus {
 					// add to status before creating, so we don't lose track if something goes wrong afterwards
 					rr.Object.GetStatus().Replicas.AddRaw(metav1.GroupVersionKind(renderedGVK), rendered.GetNamespace(), rendered.GetName(), clusterStatusRef)
-					if err := c.platformClient.Status().Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
+					if err := platformCluster.GetClient().Status().Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
 						rerr := errutils.WithReason(fmt.Errorf("unable to update status of (Cluster)Replica '%s' before creating target resource: %w", rr.Object.NamespacedName(), err), cconst.ReasonPlatformClusterInteractionProblem)
 						errs.Append(rerr)
 						createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
@@ -544,7 +567,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, rr Reconci
 	return rr, managedResources
 }
 
-func (c *ReplicaController) handleDelete(ctx context.Context, rr ReconcileResult) ReconcileResult {
+func (c *ReplicaController) handleDelete(ctx context.Context, platformCluster cluster.Cluster, rr ReconcileResult) ReconcileResult {
 	log := logging.FromContextOrPanic(ctx)
 	log.Debug("Handling deletion")
 
@@ -561,7 +584,7 @@ func (c *ReplicaController) handleDelete(ctx context.Context, rr ReconcileResult
 	// remove finalizer
 	if controllerutil.RemoveFinalizer(rr.Object, repv1alpha1.ReplicaFinalizer) {
 		log.Info("Removing finalizer from (Cluster)Replica")
-		if err := c.platformClient.Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
+		if err := platformCluster.GetClient().Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to remove finalizer from (Cluster)Replica '%s': %w", rr.Object.NamespacedName(), err), cconst.ReasonPlatformClusterInteractionProblem)
 			createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
 			return rr
@@ -731,4 +754,32 @@ func wrapTemplateError(err error, template string, input map[string]any, output 
 		bld.WithFormattedOutput(&output)
 	}
 	return bld.Build()
+}
+
+func (c *ReplicaController) SetupWithMulticlusterManager(mgr mcmanager.Manager) error {
+	return mcbuilder.ControllerManagedBy(mgr).
+		For(&repv1alpha1.Replica{}, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithPredicates(replicaPredicates())).
+		Watches(&repv1alpha1.ClusterReplica{}, mchandler.EnqueueRequestForObject, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithPredicates(replicaPredicates())).
+		WatchesRawSource(source.TypedChannel(shared.SharedInformation().GetReplicaNotificationChannel(), &handler.TypedFuncs[client.Object, mcreconcile.Request]{
+			// for some reason, using mchandler.TypedEnqueueRequestForObject here does not work, so we have to implement the function ourselves
+			GenericFunc: func(ctx context.Context, tge event.TypedGenericEvent[client.Object], trli workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
+				// leaving the cluster name empty should always result in the hosting cluster being used
+				trli.Add(mcreconcile.Request{Request: reconcile.Request{NamespacedName: client.ObjectKeyFromObject(tge.Object)}})
+			},
+		})).
+		Complete(c)
+}
+
+func replicaPredicates() predicate.Predicate {
+	return predicate.And(
+		predicate.Or(
+			predicate.GenerationChangedPredicate{},
+			ctrlutils.DeletionTimestampChangedPredicate{},
+			ctrlutils.GotAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueReconcile),
+			ctrlutils.LostAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+		),
+		predicate.Not(
+			ctrlutils.HasAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+		),
+	)
 }
