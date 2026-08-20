@@ -238,6 +238,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 	createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionTrue, "", "")
 
 	managedResources := map[commonapi.ObjectReference][]client.Object{}
+	conflictDetection := map[commonapi.ObjectReference]map[commonapi.TypedObjectReference][]byte{} // cluster ref -> target resource ref -> rendered template
 	errs := errutils.NewReasonableErrorList()
 	for _, targetDef := range rr.Object.GetSpec().Targets {
 		// filter Cluster resources with selector
@@ -309,6 +310,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 			for _, targetNamespace := range targetNamespaces {
 				// render template
 				var rendered *unstructured.Unstructured
+				var renderedRaw []byte
 				if rr.Object.GetSpec().Template == nil {
 					// no template: exact copy of the single source
 					src := sources[rr.Object.GetSpec().Sources[0].ID]
@@ -323,6 +325,14 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					delete(rendered.Object, "status")
 					if targetNamespace != "" {
 						rendered.SetNamespace(targetNamespace)
+					}
+					// marshal the resource to yaml, because we need this for the conflict detection later
+					renderedRaw, err = yaml.Marshal(rendered)
+					if err != nil {
+						rerr := errutils.WithReason(fmt.Errorf("unable to marshal source resource '%s' (id: %s) to yaml: %w", namespacedName(src), rr.Object.GetSpec().Sources[0].ID, err), cconst.ReasonInternalError)
+						errs.Append(rerr)
+						createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						continue
 					}
 				} else {
 					// build template data
@@ -364,7 +374,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 						}
 						continue
 					}
-					renderedRaw := buf.Bytes()
+					renderedRaw = buf.Bytes()
 					rendered = &unstructured.Unstructured{}
 					if err := yaml.Unmarshal(renderedRaw, rendered); err != nil {
 						rerr := errutils.WithReason(fmt.Errorf("unable to unmarshal rendered template: %w", wrapTemplateError(err, rawTemplate, tmplData, string(renderedRaw))), cconst.ReasonConfigurationProblem)
@@ -382,6 +392,28 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 
 				renderedGVK := rendered.GroupVersionKind()
 				tlog := clog.WithValues("targetName", rendered.GetName(), "targetNamespace", rendered.GetNamespace(), "targetGroup", renderedGVK.Group, "targetVersion", renderedGVK.Version, "targetKind", renderedGVK.Kind)
+
+				// This section is for conflict detection.
+				// We cache the yaml representation (rendered template in case of a template) of all target resources created so far.
+				// If a new target resource has the same identity (cluster, namespace, name, group, version, kind) as an existing one, we compare the yaml representation.
+				// If they are different, we have a conflict and report an error.
+				// If they are fully identical, no error is reported, and we skip the resource updating logic as this should already have been handled in a previous iteration.
+				if _, ok := conflictDetection[commonapi.ReferenceFromObject(targetCluster)]; !ok {
+					conflictDetection[commonapi.ReferenceFromObject(targetCluster)] = map[commonapi.TypedObjectReference][]byte{}
+				} else if existing, ok := conflictDetection[commonapi.ReferenceFromObject(targetCluster)][commonapi.TypedReferenceFromObject(rendered)]; ok {
+					if !bytes.Equal(existing, renderedRaw) {
+						rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' is rendered from multiple sources, which is not allowed", client.ObjectKeyFromObject(rendered).String(), rendered.GetObjectKind().GroupVersionKind().String(), logClusterName), repv1alpha1.ReasonTargetConflict)
+						errs.Append(rerr)
+						createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						continue
+					} else {
+						// Ignore the conflict, as both generated target resources are completely identical.
+						// We can skip the updating logic in this case.
+						createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonIdenticalCopy, "Skipped creating/updating target resource, as it is an identical copy of an already created/updated target resource. This can happen if the same namespace on the same cluster is selected multiple times by one or more target definitions.")
+						continue
+					}
+				}
+				conflictDetection[commonapi.ReferenceFromObject(targetCluster)][commonapi.TypedReferenceFromObject(rendered)] = renderedRaw
 
 				// set management labels/annotations
 				labels := rendered.GetLabels()
@@ -413,9 +445,11 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				if existing != nil {
 					// check if the existing resource is owned by the (Cluster)Replica
 					// handle according to the target definition's target conflict policy if not
-					ownedByThis := existing.GetLabels()[repv1alpha1.ReplicaSourceKindLabel] == rr.Object.ReplicaKind() &&
-						existing.GetLabels()[repv1alpha1.ReplicaSourceNameLabel] == rr.Object.GetName() &&
-						existing.GetLabels()[repv1alpha1.ReplicaSourceNamespaceLabel] == rr.Object.GetNamespace()
+					owningReplicaKind := existing.GetLabels()[repv1alpha1.ReplicaSourceKindLabel]
+					owningReplicaName := existing.GetLabels()[repv1alpha1.ReplicaSourceNameLabel]
+					owningReplicaNamespace := existing.GetLabels()[repv1alpha1.ReplicaSourceNamespaceLabel]
+					ownedByThis := owningReplicaKind == rr.Object.ReplicaKind() && owningReplicaName == rr.Object.GetName() && owningReplicaNamespace == rr.Object.GetNamespace()
+					ownedByOther := !ownedByThis && owningReplicaKind != ""
 					if !ownedByThis {
 						switch targetDef.GetTargetConflictPolicy() {
 						case repv1alpha1.TargetConflictPolicyOverwrite:
@@ -426,6 +460,34 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 								continue
 							}
+
+							// also return an error if the existing resource is owned by another (Cluster)Replica, as we cannot overwrite it in that case
+							if ownedByOther {
+								sb := strings.Builder{}
+								switch owningReplicaKind {
+								case strings.ToLower(repv1alpha1.KindReplica):
+									sb.WriteString(repv1alpha1.KindReplica)
+									sb.WriteString(" '")
+									sb.WriteString(owningReplicaNamespace)
+									sb.WriteString("/")
+								case strings.ToLower(repv1alpha1.KindClusterReplica):
+									sb.WriteString(repv1alpha1.KindClusterReplica)
+									sb.WriteString(" '")
+								default:
+									sb.WriteString("(Cluster)Replica")
+									sb.WriteString(" '")
+									sb.WriteString(owningReplicaNamespace)
+									sb.WriteString("/")
+								}
+								sb.WriteString(owningReplicaName)
+								sb.WriteString("'")
+
+								rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' already exists and is owned by other %s, cannot overwrite", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName, sb.String()), repv1alpha1.ReasonTargetConflict)
+								errs.Append(rerr)
+								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+								continue
+							}
+
 							// fall through to create/update
 							tlog.Info("Overwriting existing target resource which is currently not owned by this (Cluster)Replica")
 						case repv1alpha1.TargetConflictPolicySkip:
@@ -433,26 +495,12 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 							createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target resource '%s' (%s) in cluster '%s' already exists and is not owned by this (Cluster)Replica, skipping", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName))
 							continue
 						case repv1alpha1.TargetConflictPolicyFail:
+							fallthrough
+						default:
 							rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' already exists and is not owned by this (Cluster)Replica", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName), cconst.ReasonConfigurationProblem)
 							errs.Append(rerr)
 							createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 							continue
-						}
-					} else {
-						createdForThisCluster := managedResources[commonapi.ReferenceFromObject(targetCluster)]
-						for _, obj := range createdForThisCluster {
-							if obj.GetName() == rendered.GetName() &&
-								obj.GetNamespace() == rendered.GetNamespace() &&
-								obj.GetObjectKind().GroupVersionKind().Group == renderedGVK.Group &&
-								obj.GetObjectKind().GroupVersionKind().Version == renderedGVK.Version &&
-								obj.GetObjectKind().GroupVersionKind().Kind == renderedGVK.Kind {
-								// This happens if multiple target definitions in the same (Cluster)Replica result in the same target resource.
-								// As the generated resources can differ, this must always result in an error.
-								rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' is created by this (Cluster)Replica multiple times", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName), repv1alpha1.ReasonTargetConflict)
-								errs.Append(rerr)
-								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
-								continue
-							}
 						}
 					}
 				} else {
@@ -763,7 +811,7 @@ func (c *ReplicaController) SetupWithMulticlusterManager(mgr mcmanager.Manager) 
 		WatchesRawSource(source.TypedChannel(shared.SharedInformation().GetReplicaNotificationChannel(), &handler.TypedFuncs[client.Object, mcreconcile.Request]{
 			// for some reason, using mchandler.TypedEnqueueRequestForObject here does not work, so we have to implement the function ourselves
 			GenericFunc: func(ctx context.Context, tge event.TypedGenericEvent[client.Object], trli workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
-				// leaving the cluster name empty should always result in the hosting cluster being used
+				// leaving the cluster name empty should result in the hosting cluster being used
 				trli.Add(mcreconcile.Request{Request: reconcile.Request{NamespacedName: client.ObjectKeyFromObject(tge.Object)}})
 			},
 		})).
@@ -775,11 +823,18 @@ func replicaPredicates() predicate.Predicate {
 		predicate.Or(
 			predicate.GenerationChangedPredicate{},
 			ctrlutils.DeletionTimestampChangedPredicate{},
-			ctrlutils.GotAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueReconcile),
-			ctrlutils.LostAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+			// as the (Cluster)Replica's annotations and labels are available for templating, we need to react to any changes on them
+			predicate.LabelChangedPredicate{},
+			predicate.AnnotationChangedPredicate{},
 		),
 		predicate.Not(
-			ctrlutils.HasAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+			// skip reconciliation if
+			// - the (Cluster)Replica has the ignore annotation, or
+			// - the (Cluster)Replica just lost the reconcile annotation (because this very likely happened as a result of a reconciliation, and we don't want to trigger another one immediately after)
+			predicate.Or(
+				ctrlutils.HasAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+				ctrlutils.LostAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueReconcile),
+			),
 		),
 	)
 }
