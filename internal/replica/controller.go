@@ -200,12 +200,17 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 	}
 
 	// parse template
-	rawTemplate := string(*rr.Object.GetSpec().Template)
-	tmpl, err := gotmpl.New("").Funcs(sprig.FuncMap()).Parse(rawTemplate)
-	if err != nil {
-		rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to parse template: %w", wrapTemplateError(err, rawTemplate, nil, "")), cconst.ReasonConfigurationProblem)
-		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
-		return rr, nil
+	var tmpl *gotmpl.Template
+	var rawTemplate string
+	if rr.Object.GetSpec().Template != nil {
+		var err error
+		rawTemplate = string(*rr.Object.GetSpec().Template)
+		tmpl, err = gotmpl.New("").Funcs(sprig.FuncMap()).Parse(rawTemplate)
+		if err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to parse template: %w", wrapTemplateError(err, rawTemplate, nil, "")), cconst.ReasonConfigurationProblem)
+			createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
+			return rr, nil
+		}
 	}
 
 	// fetch source resources
@@ -269,28 +274,31 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				continue
 			}
 
-			access, err := c.provider.Get(ctx, clusterName)
-			if err != nil {
-				rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s': %w", logClusterName, err), provider.ReasonClusterAccessError)
-				errs.Append(rerr)
-				createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
-				continue
-			}
-
 			// resolve target namespaces
 			var targetNamespaces []string // empty string means "no namespace selector, template must specify it"
-			if targetDef.Namespace != nil {
-				nsList := &corev1.NamespaceList{}
-				if err := access.GetClient().List(ctx, nsList); err != nil {
-					rerr := errutils.WithReason(fmt.Errorf("unable to list namespaces in cluster '%s': %w", logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
+			var access cluster.Cluster
+			var err error
+			if targetDef.Cluster != nil && targetDef.Cluster.Location != nil && *targetDef.Cluster.Location == repv1alpha1.NextToCluster {
+				targetNamespaces = []string{targetCluster.Namespace}
+				access = platformCluster
+			} else {
+				access, err = c.provider.Get(ctx, clusterName)
+				if err != nil {
+					rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s': %w", logClusterName, err), provider.ReasonClusterAccessError)
 					errs.Append(rerr)
 					createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 					continue
 				}
-				for _, ns := range nsList.Items {
-					if targetDef.Namespace.Selector == nil {
-						targetNamespaces = append(targetNamespaces, ns.Name)
-					} else {
+
+				if targetDef.Namespace != nil && targetDef.Namespace.Selector != nil {
+					nsList := &corev1.NamespaceList{}
+					if err := access.GetClient().List(ctx, nsList); err != nil {
+						rerr := errutils.WithReason(fmt.Errorf("unable to list namespaces in cluster '%s': %w", logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
+						errs.Append(rerr)
+						createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						continue
+					}
+					for _, ns := range nsList.Items {
 						ok, err := targetDef.Namespace.Selector.Matches(&ns)
 						if err != nil {
 							errs.Append(errutils.WithReason(fmt.Errorf("unable to match namespace selector against namespace '%s' in cluster '%s': %w", ns.Name, logClusterName, err), cconst.ReasonConfigurationProblem))
@@ -301,9 +309,9 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 							targetNamespaces = append(targetNamespaces, ns.Name)
 						}
 					}
+				} else {
+					targetNamespaces = []string{""}
 				}
-			} else {
-				targetNamespaces = []string{""}
 			}
 
 			clusterConUsedForTemplateError := false
@@ -311,7 +319,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				// render template
 				var rendered *unstructured.Unstructured
 				var renderedRaw []byte
-				if rr.Object.GetSpec().Template == nil {
+				if tmpl == nil {
 					// no template: exact copy of the single source
 					src := sources[rr.Object.GetSpec().Sources[0].ID]
 					rendered = src.DeepCopy()
