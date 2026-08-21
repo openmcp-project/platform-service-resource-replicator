@@ -40,7 +40,7 @@ func gvkForConType(gvk metav1.GroupVersionKind) string {
 }
 
 func namespacedNameForConType(nn types.NamespacedName) string {
-	return strings.TrimPrefix(fmt.Sprintf("%s/%s", nn.Namespace, nn.Name), ".")
+	return strings.TrimPrefix(fmt.Sprintf("%s.%s", nn.Namespace, nn.Name), ".")
 }
 
 func namespacedName(obj client.Object) string {

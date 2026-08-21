@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -153,9 +154,18 @@ func (c *ReplicaController) reconcile(ctx context.Context, req mcreconcile.Reque
 		rr.Object.GetStatus().Replicas = repv1alpha1.CreatedResourcesWithTypeList{}
 	}
 
+	// list Cluster resources — needed for both create/update and delete paths
+	createCon := ctrlutils.GenerateCreateConditionFunc(&rr)
+	clusterList := &clustersv1alpha1.ClusterList{}
+	if err := platformCluster.GetClient().List(ctx, clusterList); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to list Cluster resources: %w", err), cconst.ReasonPlatformClusterInteractionProblem)
+		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
+		return rr
+	}
+
 	var managedResources map[commonapi.ObjectReference][]client.Object
 	if rep.GetDeletionTimestamp().IsZero() {
-		rr, managedResources = c.handleCreateOrUpdate(ctx, platformCluster, rr)
+		rr, managedResources = c.handleCreateOrUpdate(ctx, platformCluster, clusterList, rr)
 	} else {
 		rr = c.handleDelete(ctx, platformCluster, rr)
 		if rr.ReconcileError == nil {
@@ -165,7 +175,7 @@ func (c *ReplicaController) reconcile(ctx context.Context, req mcreconcile.Reque
 	}
 
 	// remove obsolete resources
-	rr = c.deleteObsoleteResources(ctx, rr, managedResources)
+	rr = c.deleteObsoleteResources(ctx, clusterList, rr, managedResources)
 
 	// ensure that all managed resources are in the (Cluster)Replica's status
 	for clusterRef, resources := range managedResources {
@@ -182,7 +192,7 @@ func (c *ReplicaController) reconcile(ctx context.Context, req mcreconcile.Reque
 	return rr
 }
 
-func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCluster cluster.Cluster, rr ReconcileResult) (ReconcileResult, map[commonapi.ObjectReference][]client.Object) {
+func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCluster cluster.Cluster, clusterList *clustersv1alpha1.ClusterList, rr ReconcileResult) (ReconcileResult, map[commonapi.ObjectReference][]client.Object) {
 	log := logging.FromContextOrPanic(ctx)
 	log.Debug("Handling creation/update")
 
@@ -233,13 +243,6 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 		createCon(SourceCondition(src.TypedObjectReference), metav1.ConditionTrue, repv1alpha1.ConditionReasonSourceRead, fmt.Sprintf("Source resource '%s' (id: %s) successfully read", namespacedName(obj), src.ID))
 	}
 
-	// list Cluster resources
-	clusterList := &clustersv1alpha1.ClusterList{}
-	if err := platformCluster.GetClient().List(ctx, clusterList); err != nil {
-		rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to list Cluster resources: %w", err), cconst.ReasonPlatformClusterInteractionProblem)
-		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
-		return rr, nil
-	}
 	createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionTrue, "", "")
 
 	managedResources := map[commonapi.ObjectReference][]client.Object{}
@@ -659,7 +662,7 @@ func (c *ReplicaController) handleDelete(ctx context.Context, platformCluster cl
 // deleteObsoleteResources deletes resources that are no longer managed by the (Cluster)Replica.
 // No-op if the managedResources map is nil, which indicates that an error occurred before the managed resources could be determined,
 // or if the Object is nil, which indicates that the finalizer has been removed and the (Cluster)Replica is probably already gone.
-func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, rr ReconcileResult, managedResources map[commonapi.ObjectReference][]client.Object) ReconcileResult {
+func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, clusterList *clustersv1alpha1.ClusterList, rr ReconcileResult, managedResources map[commonapi.ObjectReference][]client.Object) ReconcileResult {
 	log := logging.FromContextOrPanic(ctx)
 
 	if rr.Object == nil {
@@ -673,6 +676,14 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, rr Reco
 	log.Debug("Deleting obsolete resources")
 
 	createCon := ctrlutils.GenerateCreateConditionFunc(&rr)
+	inDeletion := !rr.Object.GetDeletionTimestamp().IsZero()
+
+	// build a set of existing cluster refs from the cluster list for quick lookup
+	existingClusters := sets.New[commonapi.ObjectReference]()
+	for i := range clusterList.Items {
+		cl := &clusterList.Items[i]
+		existingClusters.Insert(commonapi.ObjectReference{Name: cl.Name, Namespace: cl.Namespace})
+	}
 
 	// first, get a list of managed resources
 	// The list in the status is the source of truth for this.
@@ -694,11 +705,11 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, rr Reco
 	// ensure that there are no duplicates in the resourcesToDelete map
 	// (should not happen, but will cause problems if it does)
 	for clusterRef, resources := range resourcesToDelete {
-		seen := map[commonapi.TypedObjectReference]bool{}
+		seen := sets.New[commonapi.TypedObjectReference]()
 		uniqueResources := []commonapi.TypedObjectReference{}
 		for _, res := range resources {
-			if !seen[res] {
-				seen[res] = true
+			if !seen.Has(res) {
+				seen.Insert(res)
 				uniqueResources = append(uniqueResources, res)
 			}
 		}
@@ -724,6 +735,21 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, rr Reco
 		}
 	}
 
+	// prune entries whose Cluster resource no longer exists — remove from status without attempting deletion
+	for clusterRef, resources := range resourcesToDelete {
+		if clusterRef == hostingPlatformClusterRef {
+			continue
+		}
+		if !existingClusters.Has(clusterRef) {
+			log.Info("Removing status entries for resources in a cluster that no longer exists", "cluster", clusterRef.NamespacedName().String())
+			for _, res := range resources {
+				rr.ConditionsToRemove = append(rr.ConditionsToRemove, TargetCondition(clusterRef, res))
+				rr.Object.GetStatus().Replicas.RemoveRaw(res.GroupVersionKind, res.Namespace, res.Name, &clusterRef)
+			}
+			delete(resourcesToDelete, clusterRef)
+		}
+	}
+
 	// also remove all resources for which there is a condition to be updated
 	// (this is to avoid deleting resources that failed to be created/updated)
 	seenClusterConditions := map[string]metav1.ConditionStatus{}
@@ -735,14 +761,16 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, rr Reco
 			seenTargetConditions[conToBe.Type] = conToBe.Status
 		}
 	}
-	// first, let's remove all clusters completely which have an unhealthy cluster condition
-	for clusterRef := range resourcesToDelete {
-		if status, ok := seenClusterConditions[ClusterCondition(clusterRef)]; ok && status == metav1.ConditionFalse {
-			log.Debug("Skipping deletion of resources in cluster because there is an unhealthy cluster condition update", "cluster", clusterRef.NamespacedName().String())
-			delete(resourcesToDelete, clusterRef)
+	// skip clusters with an unhealthy cluster condition, unless the replica itself is being deleted
+	if !inDeletion {
+		for clusterRef := range resourcesToDelete {
+			if status, ok := seenClusterConditions[ClusterCondition(clusterRef)]; ok && status == metav1.ConditionFalse {
+				log.Debug("Skipping deletion of resources in cluster because there is an unhealthy cluster condition update", "cluster", clusterRef.NamespacedName().String())
+				delete(resourcesToDelete, clusterRef)
+			}
 		}
 	}
-	// then, all targets resources for which there is any condition update
+	// then, all target resources for which there is any condition update
 	for clusterRef, resources := range resourcesToDelete {
 		remainingResources := []commonapi.TypedObjectReference{}
 		for _, res := range resources {
@@ -778,19 +806,52 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, rr Reco
 			rtd.SetGroupVersionKind(schema.GroupVersionKind(res.GroupVersionKind))
 			rtd.SetName(res.Name)
 			rtd.SetNamespace(res.Namespace)
-			if err := access.GetClient().Delete(ctx, rtd); err != nil {
+
+			// fetch the resource to check its deletion policy label
+			if err := access.GetClient().Get(ctx, client.ObjectKeyFromObject(rtd), rtd); err != nil {
 				if !apierrors.IsNotFound(err) {
-					rerr := errutils.WithReason(fmt.Errorf("unable to delete target resource '%s' (%s) in cluster '%s': %w", namespacedName(rtd), rtd.GetObjectKind().GroupVersionKind().String(), logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
+					rerr := errutils.WithReason(fmt.Errorf("unable to get target resource '%s' (%s) in cluster '%s' for deletion: %w", namespacedName(rtd), rtd.GetObjectKind().GroupVersionKind().String(), logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
 					errs.Append(rerr)
 					createCon(TargetCondition(clusterRef, res), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 					continue
 				}
+				// already gone
 				log.Debug("Obsolete target resource already deleted", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
 			} else {
-				log.Info("Deleted target resource", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
+				labels := rtd.GetLabels()
+				isManaged := labels[openmcpconst.ManagedByLabel] == c.providerName && labels[repv1alpha1.ReplicaSourceNameLabel] == rr.Object.GetName() && labels[repv1alpha1.ReplicaSourceKindLabel] == strings.ToLower(rr.Object.ReplicaKind())
+				if !isManaged {
+					log.Info("Obsolete target resource is not managed by this (Cluster)Replica, skipping deletion", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
+				} else if labels[repv1alpha1.ReplicaDeletionPolicyLabel] == repv1alpha1.ReplicaDeletionPolicyKeep {
+					log.Debug("Resource has custom deletion policy", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind, "deletionPolicy", labels[repv1alpha1.ReplicaDeletionPolicyLabel])
+					// remove controller-owned labels instead of deleting the resource
+					old := rtd.DeepCopy()
+					delete(labels, repv1alpha1.ReplicaSourceKindLabel)
+					delete(labels, repv1alpha1.ReplicaSourceNameLabel)
+					delete(labels, repv1alpha1.ReplicaSourceNamespaceLabel)
+					delete(labels, repv1alpha1.ReplicaSourceGenerationLabel)
+					delete(labels, repv1alpha1.ReplicaDeletionPolicyLabel)
+					rtd.SetLabels(labels)
+					if err := access.GetClient().Patch(ctx, rtd, client.MergeFrom(old)); err != nil {
+						rerr := errutils.WithReason(fmt.Errorf("unable to remove labels from retained target resource '%s' (%s) in cluster '%s': %w", namespacedName(rtd), rtd.GetObjectKind().GroupVersionKind().String(), logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
+						errs.Append(rerr)
+						createCon(TargetCondition(clusterRef, res), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						continue
+					}
+					log.Info("Kept target resource and removed management labels, according to deletion policy label", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
+				} else {
+					if err := access.GetClient().Delete(ctx, rtd); client.IgnoreNotFound(err) != nil {
+						rerr := errutils.WithReason(fmt.Errorf("unable to delete target resource '%s' (%s) in cluster '%s': %w", namespacedName(rtd), rtd.GetObjectKind().GroupVersionKind().String(), logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
+						errs.Append(rerr)
+						createCon(TargetCondition(clusterRef, res), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						continue
+					} else {
+						log.Info("Deleted target resource", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
+					}
+				}
 			}
-			rr.ConditionsToRemove = append(rr.ConditionsToRemove, TargetCondition(clusterRef, res))
 
+			rr.ConditionsToRemove = append(rr.ConditionsToRemove, TargetCondition(clusterRef, res))
 			// remove the resource from the status, if it is still there
 			rr.Object.GetStatus().Replicas.RemoveRaw(res.GroupVersionKind, res.Namespace, res.Name, &clusterRef)
 		}

@@ -20,6 +20,12 @@ const (
 	// This is used to determine whether the copy is up-to-date with the source.
 	ReplicaSourceGenerationLabel = ReplicaGroupPrefix + "/generation"
 
+	// ReplicaDeletionPolicyLabel can be set on a resource copy to control what happens when the controller deletes it.
+	// If absent, the resource is deleted normally.
+	ReplicaDeletionPolicyLabel = ReplicaGroupPrefix + "/deletion-policy"
+	// ReplicaDeletionPolicyKeep causes the controller to remove its own labels from the resource instead of deleting it.
+	ReplicaDeletionPolicyKeep = "Keep"
+
 	// ReasonTargetClusterInteractionProblem indicates that the reconciliation of a Replica or ClusterReplica failed due to an error when interacting with the target cluster.
 	ReasonTargetClusterInteractionProblem = "TargetClusterInteractionProblem"
 	// ReasonTargetConflict indicates that the controller tried to create a target resource that already exists and is not owned by the Replica or ClusterReplica.

@@ -7,7 +7,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
-var sharedInstance *sharedInformation
+var (
+	sharedInstance *sharedInformation
+	sharedOnce     sync.Once
+)
 
 // sharedInformation contains information which is shared between multiple controllers.
 // All access to it should happen via its methods, which need to be thread-safe.
@@ -18,12 +21,10 @@ type sharedInformation struct {
 }
 
 func SharedInformation() *sharedInformation {
-	if sharedInstance == nil {
-		sharedInstance = &sharedInformation{
-			lock: sync.RWMutex{},
-		}
+	sharedOnce.Do(func() {
+		sharedInstance = &sharedInformation{}
 		sharedInstance.Reset() // initialize all fields to their default values
-	}
+	})
 	return sharedInstance
 }
 
@@ -36,8 +37,7 @@ func (si *sharedInformation) Reset() {
 	si.replicaNotificationChannel = make(chan event.TypedGenericEvent[client.Object], 1000)
 }
 
-// EnqueueReplica enqueues the referenced Replica for reconciliation.
-// If the given namespace is empty, the reference is assumed to point to a ClusterReplica instead of a Replica.
+// EnqueueReplica enqueues the given (Cluster)Replica for reconciliation.
 func (si *sharedInformation) EnqueueReplica(obj client.Object) {
 	si.replicaNotificationChannel <- event.TypedGenericEvent[client.Object]{Object: obj}
 }
