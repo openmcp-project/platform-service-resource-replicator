@@ -272,6 +272,12 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				logClusterName = HostingPlatformClusterNameForLogging
 			}
 			clog := log.WithValues("cluster", logClusterName)
+			// clusterRef is the stable reference used for conditions and status tracking;
+			// ReferenceFromObject cannot be called on a nil targetCluster (hosting platform cluster case)
+			var clusterRef commonapi.ObjectReference
+			if targetCluster != nil {
+				clusterRef = clusterRef
+			}
 
 			if targetCluster != nil && !targetCluster.GetDeletionTimestamp().IsZero() {
 				clog.Debug("Cluster is in deletion, triggering deletion of resource replicas on it")
@@ -290,7 +296,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				if err != nil {
 					rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s': %w", logClusterName, err), provider.ReasonClusterAccessError)
 					errs.Append(rerr)
-					createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+					createCon(ClusterCondition(clusterRef), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 					continue
 				}
 
@@ -299,7 +305,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					if err := access.GetClient().List(ctx, nsList); err != nil {
 						rerr := errutils.WithReason(fmt.Errorf("unable to list namespaces in cluster '%s': %w", logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
 						errs.Append(rerr)
-						createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						createCon(ClusterCondition(clusterRef), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 						continue
 					}
 					for _, ns := range nsList.Items {
@@ -342,7 +348,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					if err != nil {
 						rerr := errutils.WithReason(fmt.Errorf("unable to marshal source resource '%s' (id: %s) to yaml: %w", namespacedName(src), rr.Object.GetSpec().Sources[0].ID, err), cconst.ReasonInternalError)
 						errs.Append(rerr)
-						createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 						continue
 					}
 				} else {
@@ -409,22 +415,22 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				// If a new target resource has the same identity (cluster, namespace, name, group, version, kind) as an existing one, we compare the yaml representation.
 				// If they are different, we have a conflict and report an error.
 				// If they are fully identical, no error is reported, and we skip the resource updating logic as this should already have been handled in a previous iteration.
-				if _, ok := conflictDetection[commonapi.ReferenceFromObject(targetCluster)]; !ok {
-					conflictDetection[commonapi.ReferenceFromObject(targetCluster)] = map[commonapi.TypedObjectReference][]byte{}
-				} else if existing, ok := conflictDetection[commonapi.ReferenceFromObject(targetCluster)][commonapi.TypedReferenceFromObject(rendered)]; ok {
+				if _, ok := conflictDetection[clusterRef]; !ok {
+					conflictDetection[clusterRef] = map[commonapi.TypedObjectReference][]byte{}
+				} else if existing, ok := conflictDetection[clusterRef][commonapi.TypedReferenceFromObject(rendered)]; ok {
 					if !bytes.Equal(existing, renderedRaw) {
 						rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' is rendered from multiple sources, which is not allowed", client.ObjectKeyFromObject(rendered).String(), rendered.GetObjectKind().GroupVersionKind().String(), logClusterName), repv1alpha1.ReasonTargetConflict)
 						errs.Append(rerr)
-						createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 						continue
 					} else {
 						// Ignore the conflict, as both generated target resources are completely identical.
 						// We can skip the updating logic in this case.
-						createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonIdenticalCopy, "Skipped creating/updating target resource, as it is an identical copy of an already created/updated target resource. This can happen if the same namespace on the same cluster is selected multiple times by one or more target definitions.")
+						createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonIdenticalCopy, "Skipped creating/updating target resource, as it is an identical copy of an already created/updated target resource. This can happen if the same namespace on the same cluster is selected multiple times by one or more target definitions.")
 						continue
 					}
 				}
-				conflictDetection[commonapi.ReferenceFromObject(targetCluster)][commonapi.TypedReferenceFromObject(rendered)] = renderedRaw
+				conflictDetection[clusterRef][commonapi.TypedReferenceFromObject(rendered)] = renderedRaw
 
 				// set management labels/annotations
 				labels := rendered.GetLabels()
@@ -438,6 +444,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				if rr.Object.ReplicaKind() == repv1alpha1.KindReplica {
 					labels[repv1alpha1.ReplicaSourceNamespaceLabel] = rr.Object.GetNamespace()
 				}
+				rendered.SetLabels(labels)
 
 				// check if target resource already exists
 				existing := &unstructured.Unstructured{}
@@ -448,7 +455,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					if !apierrors.IsNotFound(err) {
 						rerr := errutils.WithReason(fmt.Errorf("unable to check existence of target resource '%s' (%s) in cluster '%s': %w", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
 						errs.Append(rerr)
-						createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 						continue
 					}
 					existing = nil
@@ -459,7 +466,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					owningReplicaKind := existing.GetLabels()[repv1alpha1.ReplicaSourceKindLabel]
 					owningReplicaName := existing.GetLabels()[repv1alpha1.ReplicaSourceNameLabel]
 					owningReplicaNamespace := existing.GetLabels()[repv1alpha1.ReplicaSourceNamespaceLabel]
-					ownedByThis := owningReplicaKind == rr.Object.ReplicaKind() && owningReplicaName == rr.Object.GetName() && owningReplicaNamespace == rr.Object.GetNamespace()
+					ownedByThis := owningReplicaKind == strings.ToLower(rr.Object.ReplicaKind()) && owningReplicaName == rr.Object.GetName() && owningReplicaNamespace == rr.Object.GetNamespace()
 					ownedByOther := !ownedByThis && owningReplicaKind != ""
 					if !ownedByThis {
 						switch targetDef.GetTargetConflictPolicy() {
@@ -468,7 +475,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 							if !existing.GetDeletionTimestamp().IsZero() {
 								rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' already exists, is not owned by this (Cluster)Replica, and is in deletion", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName), repv1alpha1.ReasonTargetConflict)
 								errs.Append(rerr)
-								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 								continue
 							}
 
@@ -495,7 +502,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 
 								rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' already exists and is owned by other %s, cannot overwrite", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName, sb.String()), repv1alpha1.ReasonTargetConflict)
 								errs.Append(rerr)
-								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 								continue
 							}
 
@@ -503,14 +510,14 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 							tlog.Info("Overwriting existing target resource which is currently not owned by this (Cluster)Replica")
 						case repv1alpha1.TargetConflictPolicySkip:
 							tlog.Info("Skipping target resource that already exists and is not owned by this (Cluster)Replica")
-							createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target resource '%s' (%s) in cluster '%s' already exists and is not owned by this (Cluster)Replica, skipping", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName))
+							createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target resource '%s' (%s) in cluster '%s' already exists and is not owned by this (Cluster)Replica, skipping", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName))
 							continue
 						case repv1alpha1.TargetConflictPolicyFail:
 							fallthrough
 						default:
 							rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' already exists and is not owned by this (Cluster)Replica", client.ObjectKeyFromObject(existing).String(), existing.GetObjectKind().GroupVersionKind().String(), logClusterName), cconst.ReasonConfigurationProblem)
 							errs.Append(rerr)
-							createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+							createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 							continue
 						}
 					}
@@ -524,7 +531,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 							if !apierrors.IsNotFound(err) {
 								rerr := errutils.WithReason(fmt.Errorf("unable to check existence of namespace '%s' in cluster '%s': %w", ns.Name, logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
 								errs.Append(rerr)
-								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 								continue
 							}
 							// namespace does not exist
@@ -533,18 +540,18 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 								if err := access.GetClient().Create(ctx, ns); err != nil {
 									rerr := errutils.WithReason(fmt.Errorf("unable to create namespace '%s' in cluster '%s': %w", ns.Name, logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
 									errs.Append(rerr)
-									createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+									createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 									continue
 								}
 								tlog.Info("Created namespace in target cluster", "namespace", ns.Name)
 							case repv1alpha1.NamespacePolicySkip:
 								tlog.Info("Skipping target resource because target namespace does not exist", "namespace", ns.Name)
-								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target namespace '%s' in cluster '%s' does not exist, skipping", ns.Name, logClusterName))
+								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target namespace '%s' in cluster '%s' does not exist, skipping", ns.Name, logClusterName))
 								continue
 							case repv1alpha1.NamespacePolicyFail:
 								rerr := errutils.WithReason(fmt.Errorf("target namespace '%s' in cluster '%s' does not exist", ns.Name, logClusterName), repv1alpha1.ReasonMissingNamespace)
 								errs.Append(rerr)
-								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 								continue
 							}
 						} else if !ns.DeletionTimestamp.IsZero() {
@@ -552,11 +559,11 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 							case repv1alpha1.NamespacePolicyCreate, repv1alpha1.NamespacePolicyFail:
 								rerr := errutils.WithReason(fmt.Errorf("target namespace '%s' in cluster '%s' is being deleted", ns.Name, logClusterName), repv1alpha1.ReasonNamespaceInDeletion)
 								errs.Append(rerr)
-								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 								continue
 							case repv1alpha1.NamespacePolicySkip:
 								tlog.Info("Skipping target resource because target namespace is being deleted", "namespace", ns.Name)
-								createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target namespace '%s' in cluster '%s' is being deleted, skipping", ns.Name, logClusterName))
+								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target namespace '%s' in cluster '%s' is being deleted, skipping", ns.Name, logClusterName))
 								continue
 							}
 						}
@@ -566,7 +573,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				// create or update the target resource in the target cluster
 				var clusterStatusRef *commonapi.ObjectReference
 				if targetCluster != nil {
-					ref := commonapi.ReferenceFromObject(targetCluster)
+					ref := clusterRef
 					clusterStatusRef = &ref
 				}
 				trackedInStatus := rr.Object.GetStatus().Replicas.ContainsRaw(metav1.GroupVersionKind(renderedGVK), rendered.GetNamespace(), rendered.GetName(), clusterStatusRef)
@@ -577,7 +584,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					if err := platformCluster.GetClient().Status().Patch(ctx, rr.Object, client.MergeFrom(rr.OldObject)); err != nil {
 						rerr := errutils.WithReason(fmt.Errorf("unable to update status of (Cluster)Replica '%s' before creating target resource: %w", rr.Object.NamespacedName(), err), cconst.ReasonPlatformClusterInteractionProblem)
 						errs.Append(rerr)
-						createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+						createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 						continue
 					}
 					rr.OldObject = rr.Object.DeepCopyReplicaEquivalent()
@@ -606,17 +613,16 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				if err != nil {
 					rerr := errutils.WithReason(fmt.Errorf("unable to create/update target resource '%s' (%s) in cluster '%s': %w", namespacedName(rendered), renderedGVK.String(), logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
 					errs.Append(rerr)
-					createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+					createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 					continue
 				}
 				tlog.Info("Synced target resource", "operation", opResult)
 
-				clusterRef := commonapi.ReferenceFromObject(targetCluster)
 				managedResources[clusterRef] = append(managedResources[clusterRef], target)
-				createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSynced, fmt.Sprintf("Target resource '%s' (%s) successfully synced to cluster '%s'", namespacedName(rendered), renderedGVK.String(), logClusterName))
+				createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSynced, fmt.Sprintf("Target resource '%s' (%s) successfully synced to cluster '%s'", namespacedName(rendered), renderedGVK.String(), logClusterName))
 			}
 
-			createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetClusterAccess, fmt.Sprintf("Successfully accessed cluster '%s'", logClusterName))
+			createCon(ClusterCondition(clusterRef), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetClusterAccess, fmt.Sprintf("Successfully accessed cluster '%s'", logClusterName))
 		}
 	}
 

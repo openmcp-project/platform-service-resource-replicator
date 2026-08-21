@@ -5,6 +5,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+
+	"github.com/openmcp-project/controller-utils/pkg/logging"
 )
 
 var (
@@ -38,8 +40,12 @@ func (si *sharedInformation) Reset() {
 }
 
 // EnqueueReplica enqueues the given (Cluster)Replica for reconciliation.
-func (si *sharedInformation) EnqueueReplica(obj client.Object) {
-	si.replicaNotificationChannel <- event.TypedGenericEvent[client.Object]{Object: obj}
+func (si *sharedInformation) EnqueueReplica(log logging.Logger, obj client.Object) {
+	select {
+	case si.replicaNotificationChannel <- event.TypedGenericEvent[client.Object]{Object: obj}:
+	default:
+		log.Error(nil, "Replica notification channel is full, dropping enqueue request", "name", obj.GetName(), "namespace", obj.GetNamespace())
+	}
 }
 
 func (si *sharedInformation) GetReplicaNotificationChannel() <-chan event.TypedGenericEvent[client.Object] {

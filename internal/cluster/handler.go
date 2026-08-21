@@ -84,7 +84,8 @@ func (c *ClusterHandler) enqueueAllReplicasForCluster(ctx context.Context, platf
 	}
 
 	for _, rep := range replicas {
-		// Check if the replica is associated with the given cluster
+		// Check if the replica is associated with the given cluster:
+		// either via a status entry referencing the cluster, or via a spec target selector matching it.
 		enqueued := false
 		repStatus := rep.GetStatus()
 		for _, copyWithType := range repStatus.Replicas {
@@ -95,13 +96,26 @@ func (c *ClusterHandler) enqueueAllReplicasForCluster(ctx context.Context, platf
 					} else {
 						log.Debug("Enqueuing Replica", "replica", fmt.Sprintf("%s/%s", rep.GetNamespace(), rep.GetName()), "causingCopy", fmt.Sprintf("[%s]%s/%s", copyWithType.Type.String(), copy.Namespace, copy.Name))
 					}
-					shared.SharedInformation().EnqueueReplica(rep)
+					shared.SharedInformation().EnqueueReplica(log, rep)
 					enqueued = true
 					break
 				}
 			}
 			if enqueued {
 				break
+			}
+		}
+		if !enqueued {
+			for _, targetDef := range rep.GetSpec().Targets {
+				if targetDef.Cluster != nil && (targetDef.Cluster.Selector == nil || targetDef.Cluster.Selector.Matches(cluster)) {
+					if rep.GetNamespace() == "" {
+						log.Debug("Enqueuing ClusterReplica due to matching target selector", "replica", rep.GetName())
+					} else {
+						log.Debug("Enqueuing Replica due to matching target selector", "replica", fmt.Sprintf("%s/%s", rep.GetNamespace(), rep.GetName()))
+					}
+					shared.SharedInformation().EnqueueReplica(log, rep)
+					break
+				}
 			}
 		}
 	}
