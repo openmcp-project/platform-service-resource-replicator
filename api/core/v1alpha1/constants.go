@@ -45,6 +45,10 @@ const (
 	ConditionReasonTargetSkipped = "TargetSkipped"
 	// ConditionReasonTargetSynced indicates that the corresponding target resource was successfully created or updated.
 	ConditionReasonTargetSynced = "TargetSynced"
+	// ConditionTypeTemplatingError is the condition type used when a templating error occurs during reconciliation.
+	// Only one such condition is written per reconciliation, even if the template fails for multiple clusters or namespaces.
+	ConditionTypeTemplatingError = "TemplatingError"
+
 	// ConditionReasonWaitingForManagedReplicasDeletion indicates that the controller is waiting for managed replicas to be deleted before it can proceed with deletion of the (Cluster)Replica.
 	ConditionReasonWaitingForManagedReplicasDeletion = "WaitingForManagedReplicasDeletion"
 	// ConditionReasonIdenticalCopy indicates that an identical version of the generated target resource was already created earlier by the same (Cluster)Replica, and therefore no update was necessary.

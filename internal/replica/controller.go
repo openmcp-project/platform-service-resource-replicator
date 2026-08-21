@@ -245,6 +245,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 	managedResources := map[commonapi.ObjectReference][]client.Object{}
 	conflictDetection := map[commonapi.ObjectReference]map[commonapi.TypedObjectReference][]byte{} // cluster ref -> target resource ref -> rendered template
 	errs := errutils.NewReasonableErrorList()
+	templatingErrorSet := false
 	for _, targetDef := range rr.Object.GetSpec().Targets {
 		// filter Cluster resources with selector
 		var matchedClusters []*clustersv1alpha1.Cluster
@@ -314,7 +315,6 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				}
 			}
 
-			clusterConUsedForTemplateError := false
 			for _, targetNamespace := range targetNamespaces {
 				// render template
 				var rendered *unstructured.Unstructured
@@ -376,9 +376,9 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					if err := tmpl.Execute(&buf, tmplData); err != nil {
 						rerr := errutils.WithReason(fmt.Errorf("unable to execute template: %w", wrapTemplateError(err, rawTemplate, tmplData, "")), cconst.ReasonConfigurationProblem)
 						errs.Append(rerr)
-						if !clusterConUsedForTemplateError {
-							createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
-							clusterConUsedForTemplateError = true
+						if !templatingErrorSet {
+							createCon(repv1alpha1.ConditionTypeTemplatingError, metav1.ConditionTrue, rerr.Reason(), rerr.Error())
+							templatingErrorSet = true
 						}
 						continue
 					}
@@ -387,9 +387,9 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					if err := yaml.Unmarshal(renderedRaw, rendered); err != nil {
 						rerr := errutils.WithReason(fmt.Errorf("unable to unmarshal rendered template: %w", wrapTemplateError(err, rawTemplate, tmplData, string(renderedRaw))), cconst.ReasonConfigurationProblem)
 						errs.Append(rerr)
-						if !clusterConUsedForTemplateError {
-							createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
-							clusterConUsedForTemplateError = true
+						if !templatingErrorSet {
+							createCon(repv1alpha1.ConditionTypeTemplatingError, metav1.ConditionTrue, rerr.Reason(), rerr.Error())
+							templatingErrorSet = true
 						}
 						continue
 					}
@@ -429,7 +429,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					labels = map[string]string{}
 				}
 				labels[openmcpconst.ManagedByLabel] = c.providerName
-				labels[repv1alpha1.ReplicaSourceKindLabel] = rr.Object.ReplicaKind()
+				labels[repv1alpha1.ReplicaSourceKindLabel] = strings.ToLower(rr.Object.ReplicaKind())
 				labels[repv1alpha1.ReplicaSourceGenerationLabel] = fmt.Sprintf("%d", rr.Object.GetGeneration())
 				labels[repv1alpha1.ReplicaSourceNameLabel] = rr.Object.GetName()
 				if rr.Object.ReplicaKind() == repv1alpha1.KindReplica {
@@ -613,10 +613,12 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				createCon(TargetCondition(commonapi.ReferenceFromObject(targetCluster), commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSynced, fmt.Sprintf("Target resource '%s' (%s) successfully synced to cluster '%s'", namespacedName(rendered), renderedGVK.String(), logClusterName))
 			}
 
-			if !clusterConUsedForTemplateError {
-				createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetClusterAccess, fmt.Sprintf("Successfully accessed cluster '%s'", logClusterName))
-			}
+			createCon(ClusterCondition(commonapi.ReferenceFromObject(targetCluster)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetClusterAccess, fmt.Sprintf("Successfully accessed cluster '%s'", logClusterName))
 		}
+	}
+
+	if !templatingErrorSet {
+		rr.ConditionsToRemove = append(rr.ConditionsToRemove, repv1alpha1.ConditionTypeTemplatingError)
 	}
 
 	rr.ReconcileError = errs.Aggregate()
