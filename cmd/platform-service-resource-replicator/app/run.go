@@ -20,6 +20,7 @@ import (
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 
 	clusterhandler "github.com/openmcp-project/platform-service-resource-replicator/internal/cluster"
+	namespacecontroller "github.com/openmcp-project/platform-service-resource-replicator/internal/namespace"
 	"github.com/openmcp-project/platform-service-resource-replicator/internal/replica"
 )
 
@@ -221,6 +222,9 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	}
 	if err := replica.NewReplicaController(prov, o.ProviderName, mgr.GetLocalManager().GetEventRecorder(replica.ControllerName)).SetupWithMulticlusterManager(mgr); err != nil {
 		return fmt.Errorf("unable to setup multicluster Replica controller with manager: %w", err)
+	}
+	if err := namespacecontroller.New(prov).SetupWithMulticlusterManager(mgr); err != nil {
+		return fmt.Errorf("unable to setup multicluster Namespace controller with manager: %w", err)
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

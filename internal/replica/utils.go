@@ -31,6 +31,9 @@ func TargetCondition(clusterRef commonapi.ObjectReference, ref commonapi.TypedOb
 // ClusterCondition generates a condition type for a specific cluster.
 // For uniqueness, the type must contain the name and namespace of the cluster.
 func ClusterCondition(clusterRef commonapi.ObjectReference) string {
+	if clusterRef.Name == "" && clusterRef.Namespace == "" {
+		return fmt.Sprintf("%sHostingPlatformCluster", repv1alpha1.ConditionTypeClusterPrefix)
+	}
 	// the limit for condition types seems to be a little bit more than 300
 	return ctrlutils.ShortenToXCharactersUnsafe(fmt.Sprintf("%s%s", repv1alpha1.ConditionTypeClusterPrefix, namespacedNameForConType(clusterRef.NamespacedName())), 300)
 }

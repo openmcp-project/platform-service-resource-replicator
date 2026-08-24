@@ -276,7 +276,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 			// ReferenceFromObject cannot be called on a nil targetCluster (hosting platform cluster case)
 			var clusterRef commonapi.ObjectReference
 			if targetCluster != nil {
-				clusterRef = clusterRef
+				clusterRef = commonapi.ReferenceFromObject(targetCluster)
 			}
 
 			if targetCluster != nil && !targetCluster.GetDeletionTimestamp().IsZero() {
