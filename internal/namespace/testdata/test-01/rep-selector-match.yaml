@@ -1,0 +1,17 @@
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: rep-selector-match
+  namespace: default
+spec:
+  sources:
+    - id: src
+      apiVersion: v1
+      kind: ConfigMap
+      name: source-cm
+      namespace: default
+  targets:
+    - namespace:
+        selector:
+          matchLabels:
+            env: test
