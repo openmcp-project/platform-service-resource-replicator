@@ -1,0 +1,26 @@
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: rep-status-match
+  namespace: default
+spec:
+  sources:
+    - id: src
+      apiVersion: v1
+      kind: ConfigMap
+      name: source-cm
+      namespace: default
+  targets:
+    - cluster: {}
+status:
+  replicas:
+    - type:
+        group: ""
+        version: v1
+        kind: ConfigMap
+      resources:
+        - name: some-cm
+          namespace: default
+          cluster:
+            name: cluster-a
+            namespace: ns-a

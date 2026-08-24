@@ -58,6 +58,8 @@ func (c *ClusterHandler) AfterDeletion(ctx context.Context, req mcreconcile.Requ
 	return reconcile.Result{}, nil
 }
 
+// enqueueAllReplicasForCluster enqueues all Replica and ClusterReplica resources that are associated with the given cluster.
+// 'associated' means that either the spec has a target selector that matches the cluster, or the status has a copy entry for the cluster.
 func (c *ClusterHandler) enqueueAllReplicasForCluster(ctx context.Context, platformClient client.Client, cluster *clustersv1alpha1.Cluster) error {
 	log := logging.FromContextOrPanic(ctx)
 
