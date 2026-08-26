@@ -1,15 +1,16 @@
 module github.com/openmcp-project/platform-service-resource-replicator
 
-go 1.26.5
+go 1.26.6
 
 replace github.com/openmcp-project/platform-service-resource-replicator/api => ./api
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
+	github.com/google/go-cmp v0.7.0
 	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.42.1
-	github.com/openmcp-project/controller-utils v0.31.1-0.20260817122246-85d97d4efff8
-	github.com/openmcp-project/multicluster-provider v0.0.0-20260824120257-3df14da88c9f
+	github.com/openmcp-project/controller-utils v0.31.1-0.20260825092024-c4d1028b6ea2
+	github.com/openmcp-project/multicluster-provider v0.0.0-20260825121908-ad0edad2c98c
 	github.com/openmcp-project/openmcp-operator/api v1.3.1-0.20260818105456-b3f0f5d8220a
 	github.com/openmcp-project/platform-service-resource-replicator/api v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.10.2
@@ -57,7 +58,6 @@ require (
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/google/cel-go v0.26.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7 // indirect

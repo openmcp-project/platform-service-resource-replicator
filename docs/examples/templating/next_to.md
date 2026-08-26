@@ -91,6 +91,12 @@ kind: Secret
 metadata:
   name: imagepull-cp-01
   namespace: user-01
+  labels:
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: imagepull-next-to
+    replica.core.open-control-plane.io/namespace: test-01
 type: kubernetes.io/dockerconfigjson
 data:
   .dockerconfigjson: eyJhdXRocyI6eyJnaGNyLmlvIjp7ImF1dGgiOiJzb21lYXV0aHRva2VuIn19fQ==
@@ -106,6 +112,12 @@ kind: Secret
 metadata:
   name: imagepull-cp-01
   namespace: user-02
+  labels:
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: imagepull-next-to
+    replica.core.open-control-plane.io/namespace: test-01
 type: kubernetes.io/dockerconfigjson
 data:
   .dockerconfigjson: eyJhdXRocyI6eyJnaGNyLmlvIjp7ImF1dGgiOiJzb21lYXV0aHRva2VuIn19fQ==
@@ -121,6 +133,12 @@ kind: Secret
 metadata:
   name: imagepull-cp-02
   namespace: user-02
+  labels:
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: imagepull-next-to
+    replica.core.open-control-plane.io/namespace: test-01
 type: kubernetes.io/dockerconfigjson
 data:
   .dockerconfigjson: eyJhdXRocyI6eyJnaGNyLmlvIjp7ImF1dGgiOiJzb21lYXV0aHRva2VuIn19fQ==
@@ -137,6 +155,8 @@ kind: Replica
 metadata:
   name: imagepull-next-to
   namespace: test-01
+  finalizers:
+  - replica.core.open-control-plane.io/finalizer
 spec:
   sources:
   - id: source
@@ -163,8 +183,40 @@ spec:
       location: NextTo
 status:
   phase: Ready
-  observedGeneration: 1
-  conditions: [] # redacted
+  observedGeneration: 0
+  conditions:
+  - message: "Successfully accessed cluster 'user-01/cp-01'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_user-01.cp-01
+  - message: "Successfully accessed cluster 'user-02/cp-01'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_user-02.cp-01
+  - message: "Successfully accessed cluster 'user-02/cp-02'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_user-02.cp-02
+  - message: ""
+    reason: Meta_True
+    status: "True"
+    type: Meta
+  - message: "Source resource 'registry/imagepull' (id: source) successfully read"
+    reason: SourceRead
+    status: "True"
+    type: Source_registry.imagepull_Secret.v1
+  - message: "Target resource 'user-01/imagepull-cp-01' (/v1, Kind=Secret) successfully synced to cluster 'user-01/cp-01'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_user-01.cp-01_user-01.imagepull-cp-01_Secret.v1
+  - message: "Target resource 'user-02/imagepull-cp-01' (/v1, Kind=Secret) successfully synced to cluster 'user-02/cp-01'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_user-02.cp-01_user-02.imagepull-cp-01_Secret.v1
+  - message: "Target resource 'user-02/imagepull-cp-02' (/v1, Kind=Secret) successfully synced to cluster 'user-02/cp-02'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_user-02.cp-02_user-02.imagepull-cp-02_Secret.v1
   replicas:
   - type:
       group: ""

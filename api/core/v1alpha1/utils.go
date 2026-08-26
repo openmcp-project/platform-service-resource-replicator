@@ -39,6 +39,16 @@ func (s *NamespaceSelector) Empty() bool {
 	return s.MatchIdentities == nil && s.MatchLabels == nil && len(s.MatchExpressions) == 0
 }
 
+func clusterRefEqual(a, b *commonapi.ObjectReference) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Name == b.Name && a.Namespace == b.Namespace
+}
+
 // AddRaw adds a new created resource to the list, if it is not already present.
 // An empty cluster reference is treated as nil, as it is the same as the hosting platform cluster.
 func (cr *CreatedResourcesWithType) AddRaw(namespace, name string, cluster *commonapi.ObjectReference) {
@@ -57,8 +67,8 @@ func (cr *CreatedResourcesWithType) AddRaw(namespace, name string, cluster *comm
 // Add adds a new created resource to the list, if it is not already present.
 func (cr *CreatedResourcesWithType) Add(res CreatedResource) {
 	for _, existing := range cr.Resources {
-		if existing.Name == res.Name && existing.Namespace == res.Namespace && ((existing.Cluster == nil && res.Cluster == nil) || (existing.Cluster != nil && res.Cluster != nil && existing.Cluster.Name == res.Cluster.Name && existing.Cluster.Namespace == res.Cluster.Namespace)) {
-			// Already present
+		if existing.Name == res.Name && existing.Namespace == res.Namespace && clusterRefEqual(existing.Cluster, res.Cluster) {
+			// already present
 			return
 		}
 	}
@@ -86,8 +96,8 @@ func (cr *CreatedResourcesWithType) Remove(c CreatedResource) {
 		return
 	}
 	for i, existing := range cr.Resources {
-		if existing.Name == c.Name && existing.Namespace == c.Namespace && ((existing.Cluster == nil && c.Cluster == nil) || (existing.Cluster != nil && c.Cluster != nil && existing.Cluster.Name == c.Cluster.Name && existing.Cluster.Namespace == c.Cluster.Namespace)) {
-			// Found, remove it
+		if existing.Name == c.Name && existing.Namespace == c.Namespace && clusterRefEqual(existing.Cluster, c.Cluster) {
+			// found, remove it
 			cr.Resources = append(cr.Resources[:i], cr.Resources[i+1:]...)
 			return
 		}
@@ -168,7 +178,7 @@ func (l CreatedResourcesWithTypeList) Contains(gvk metav1.GroupVersionKind, res 
 	for i := range l {
 		if l[i].Type == gvk {
 			for _, existing := range l[i].Resources {
-				if existing.Name == res.Name && existing.Namespace == res.Namespace && ((existing.Cluster == nil && res.Cluster == nil) || (existing.Cluster != nil && res.Cluster != nil && existing.Cluster.Name == res.Cluster.Name && existing.Cluster.Namespace == res.Cluster.Namespace)) {
+				if existing.Name == res.Name && existing.Namespace == res.Namespace && clusterRefEqual(existing.Cluster, res.Cluster) {
 					return true
 				}
 			}

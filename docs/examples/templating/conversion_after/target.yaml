@@ -5,6 +5,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: pod-reader
+  labels:
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: pod-reader-clusterrole
+    replica.core.open-control-plane.io/namespace: test-01
 rules:
 - apiGroups: [""]
   resources: ["pods", "pods/log"]

@@ -88,6 +88,11 @@ metadata:
   namespace: foo
   labels:
     app: foo
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: simple
+    replica.core.open-control-plane.io/namespace: test-01
   annotations:
     foo.bar.baz/ann: "true"
 type: Opaque
@@ -106,6 +111,8 @@ kind: Replica
 metadata:
   name: simple
   namespace: test-01
+  finalizers:
+  - replica.core.open-control-plane.io/finalizer
 spec:
   sources:
   - id: source
@@ -123,8 +130,32 @@ spec:
           - workload
 status:
   phase: Ready
-  observedGeneration: 1
-  conditions: [] # redacted
+  observedGeneration: 0
+  conditions:
+  - message: "Successfully accessed cluster 'workloads/wl-01'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_workloads.wl-01
+  - message: "Successfully accessed cluster 'workloads/wl-02'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_workloads.wl-02
+  - message: ""
+    reason: Meta_True
+    status: "True"
+    type: Meta
+  - message: "Source resource 'foo/cryptic' (id: source) successfully read"
+    reason: SourceRead
+    status: "True"
+    type: Source_foo.cryptic_Secret.v1
+  - message: "Target resource 'foo/cryptic' (/v1, Kind=Secret) successfully synced to cluster 'workloads/wl-01'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_workloads.wl-01_foo.cryptic_Secret.v1
+  - message: "Target resource 'foo/cryptic' (/v1, Kind=Secret) successfully synced to cluster 'workloads/wl-02'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_workloads.wl-02_foo.cryptic_Secret.v1
   replicas:
   - type:
       group: ""

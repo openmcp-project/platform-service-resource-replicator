@@ -88,10 +88,11 @@ data:
 ```yaml
 # Cluster: platform
 apiVersion: core.open-control-plane.io/v1alpha1
-kind: Replica
+kind: ClusterReplica
 metadata:
   name: simple
-  namespace: test-01
+  finalizers:
+  - replica.core.open-control-plane.io/finalizer
 spec:
   sources:
   - id: source
@@ -107,8 +108,20 @@ spec:
         - name: bar
 status:
   phase: Ready
-  observedGeneration: 1
-  conditions: [] # redacted
+  observedGeneration: 0
+  conditions:
+  - message: "Successfully accessed cluster '<hosting-platform-cluster>'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_HostingPlatformCluster
+  - message: ""
+    reason: Meta_True
+    status: "True"
+    type: Meta
+  - message: "Source resource 'foo/cryptic' (id: source) successfully read"
+    reason: SourceRead
+    status: "True"
+    type: Source_foo.cryptic_Secret.v1
   replicas:
   - type:
       group: ""

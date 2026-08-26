@@ -117,6 +117,7 @@ type TargetDefinition struct {
 
 	// NamespacePolicy specifies what to do if the target namespace does not exist.
 	// Has no effect if the rendered template results in a cluster-scoped resource.
+	// If the namespaces are identified via a namespace selector, this only has an effect if 'matchIdentities' is used, otherwise only existing namespaces will be selected.
 	// Valid values are:
 	// - Create (default)
 	//     The target namespace will be created if it does not exist.

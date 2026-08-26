@@ -147,7 +147,7 @@ The following values are available for templating:
 - `replica`: Information about the `Replica` (or `ClusterReplica`) resource responsible for the rendered target resource. It contains the following fields:
   - `name`: Name of the `Replica` (or `ClusterReplica`) resource.
   - `namespace`: Namespace of the `Replica` resource. Always empty for `ClusterReplica` resources.
-  - `labesl`: Labels of the `Replica` (or `ClusterReplica`) resource.
+  - `labels`: Labels of the `Replica` (or `ClusterReplica`) resource.
   - `annotations`: Annotations of the `Replica` (or `ClusterReplica`) resource.
 
 ### Targets
@@ -309,3 +309,5 @@ There are currently two policies which can be specified to control the operator'
 - `Fail`
   - An error will occur for every resource which cannot be created due to its missing namespace.
   - The errors are reflected in the `Replica`'s conditions and the `Replica` will not become healthy as long as the problem exists.
+**Info:**
+- This policy only comes into effect if the target resource namespace(s) are given by the template or by a namespace selector using `matchIdentities`. Other variants of selecting namespaces - e.g. via a label selector - only select existing namespaces and will therefore never trigger the problem this policy is trying to solve.

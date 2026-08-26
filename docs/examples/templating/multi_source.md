@@ -106,6 +106,12 @@ kind: Secret
 metadata:
   name: combined
   namespace: test-01
+  labels:
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: combined-secret
+    replica.core.open-control-plane.io/namespace: test-01
 type: Opaque
 data:
   password: c3VwZXJzZWNyZXQ=
@@ -124,6 +130,8 @@ kind: Replica
 metadata:
   name: combined-secret
   namespace: test-01
+  finalizers:
+  - replica.core.open-control-plane.io/finalizer
 spec:
   sources:
   - id: db
@@ -157,8 +165,24 @@ spec:
         - name: test-01
 status:
   phase: Ready
-  observedGeneration: 1
-  conditions: [] # redacted
+  observedGeneration: 0
+  conditions:
+  - message: "Successfully accessed cluster '<hosting-platform-cluster>'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_HostingPlatformCluster
+  - message: ""
+    reason: Meta_True
+    status: "True"
+    type: Meta
+  - message: "Source resource 'infra/db-credentials' (id: db) successfully read"
+    reason: SourceRead
+    status: "True"
+    type: Source_infra.db-credentials_Secret.v1
+  - message: "Source resource 'infra/tls-cert' (id: tls) successfully read"
+    reason: SourceRead
+    status: "True"
+    type: Source_infra.tls-cert_Secret.v1
   replicas:
   - type:
       group: ""

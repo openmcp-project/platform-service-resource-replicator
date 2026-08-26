@@ -1,0 +1,11 @@
+apiVersion: clusters.openmcp.cloud/v1alpha1
+kind: Cluster
+metadata:
+  name: wl-01
+  namespace: workloads
+spec:
+  kubernetes: {}
+  profile: test
+  purposes:
+  - workload
+  tenancy: Shared

@@ -215,7 +215,16 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 	if rr.Object.GetSpec().Template != nil {
 		var err error
 		rawTemplate = string(*rr.Object.GetSpec().Template)
-		tmpl, err = gotmpl.New("").Funcs(sprig.FuncMap()).Parse(rawTemplate)
+		tmpl, err = gotmpl.New("").Funcs(sprig.FuncMap()).Funcs(gotmpl.FuncMap{
+			"toYaml": func(v any) (string, error) {
+				b, err := yaml.Marshal(v)
+				return strings.TrimSuffix(string(b), "\n"), err
+			},
+			"fromYaml": func(s string) (map[string]any, error) {
+				out := map[string]any{}
+				return out, yaml.Unmarshal([]byte(s), &out)
+			},
+		}).Parse(rawTemplate)
 		if err != nil {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("unable to parse template: %w", wrapTemplateError(err, rawTemplate, nil, "")), cconst.ReasonConfigurationProblem)
 			createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
@@ -287,8 +296,9 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 			// resolve target namespaces
 			var targetNamespaces []string // empty string means "no namespace selector, template must specify it"
 			var access cluster.Cluster
+			isNextTo := targetDef.Cluster != nil && targetDef.Cluster.Location != nil && *targetDef.Cluster.Location == repv1alpha1.NextToCluster
 			var err error
-			if targetDef.Cluster != nil && targetDef.Cluster.Location != nil && *targetDef.Cluster.Location == repv1alpha1.NextToCluster {
+			if isNextTo {
 				targetNamespaces = []string{targetCluster.Namespace}
 				access = platformCluster
 			} else {
@@ -301,22 +311,29 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				}
 
 				if targetDef.Namespace != nil && targetDef.Namespace.Selector != nil {
-					nsList := &corev1.NamespaceList{}
-					if err := access.GetClient().List(ctx, nsList); err != nil {
-						rerr := errutils.WithReason(fmt.Errorf("unable to list namespaces in cluster '%s': %w", logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
-						errs.Append(rerr)
-						createCon(ClusterCondition(clusterRef), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
-						continue
-					}
-					for _, ns := range nsList.Items {
-						ok, err := targetDef.Namespace.Selector.Matches(&ns)
-						if err != nil {
-							errs.Append(errutils.WithReason(fmt.Errorf("unable to match namespace selector against namespace '%s' in cluster '%s': %w", ns.Name, logClusterName, err), cconst.ReasonConfigurationProblem))
-							// no condition in this case, but this should happen rarely enough so that this is acceptable
+					if targetDef.Namespace.Selector.MatchIdentities != nil && targetDef.GetNamespacePolicy() == repv1alpha1.NamespacePolicyCreate {
+						// If the namespaces are explicitly specified and the policy is Create, we can just use the specified namespaces and skip the listing of all namespaces in the cluster.
+						for _, identity := range targetDef.Namespace.Selector.MatchIdentities {
+							targetNamespaces = append(targetNamespaces, identity.Name)
+						}
+					} else {
+						nsList := &corev1.NamespaceList{}
+						if err := access.GetClient().List(ctx, nsList); err != nil {
+							rerr := errutils.WithReason(fmt.Errorf("unable to list namespaces in cluster '%s': %w", logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
+							errs.Append(rerr)
+							createCon(ClusterCondition(clusterRef), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 							continue
 						}
-						if ok {
-							targetNamespaces = append(targetNamespaces, ns.Name)
+						for _, ns := range nsList.Items {
+							ok, err := targetDef.Namespace.Selector.Matches(&ns)
+							if err != nil {
+								errs.Append(errutils.WithReason(fmt.Errorf("unable to match namespace selector against namespace '%s' in cluster '%s': %w", ns.Name, logClusterName, err), cconst.ReasonConfigurationProblem))
+								// no condition in this case, but this should happen rarely enough so that this is acceptable
+								continue
+							}
+							if ok {
+								targetNamespaces = append(targetNamespaces, ns.Name)
+							}
 						}
 					}
 				} else {
@@ -419,7 +436,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 					conflictDetection[clusterRef] = map[commonapi.TypedObjectReference][]byte{}
 				} else if existing, ok := conflictDetection[clusterRef][commonapi.TypedReferenceFromObject(rendered)]; ok {
 					if !bytes.Equal(existing, renderedRaw) {
-						rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' is rendered from multiple sources, which is not allowed", client.ObjectKeyFromObject(rendered).String(), rendered.GetObjectKind().GroupVersionKind().String(), logClusterName), repv1alpha1.ReasonTargetConflict)
+						rerr := errutils.WithReason(fmt.Errorf("target resource '%s' (%s) in cluster '%s' is rendered multiple times with differences (probably due to overlapping target definitions), this is not allowed", client.ObjectKeyFromObject(rendered).String(), rendered.GetObjectKind().GroupVersionKind().String(), logClusterName), repv1alpha1.ReasonTargetConflict)
 						errs.Append(rerr)
 						createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 						continue
@@ -572,9 +589,8 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 
 				// create or update the target resource in the target cluster
 				var clusterStatusRef *commonapi.ObjectReference
-				if targetCluster != nil {
-					ref := clusterRef
-					clusterStatusRef = &ref
+				if targetCluster != nil && !isNextTo {
+					clusterStatusRef = &clusterRef
 				}
 				trackedInStatus := rr.Object.GetStatus().Replicas.ContainsRaw(metav1.GroupVersionKind(renderedGVK), rendered.GetNamespace(), rendered.GetName(), clusterStatusRef)
 
@@ -618,7 +634,11 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				}
 				tlog.Info("Synced target resource", "operation", opResult)
 
-				managedResources[clusterRef] = append(managedResources[clusterRef], target)
+				managedResourcesKey := clusterRef
+				if isNextTo {
+					managedResourcesKey = commonapi.ObjectReference{}
+				}
+				managedResources[managedResourcesKey] = append(managedResources[managedResourcesKey], target)
 				createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSynced, fmt.Sprintf("Target resource '%s' (%s) successfully synced to cluster '%s'", namespacedName(rendered), renderedGVK.String(), logClusterName))
 			}
 

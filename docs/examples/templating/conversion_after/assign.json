@@ -1,0 +1,8 @@
+{
+  "workloads/wl-01": [
+    "target.yaml"
+  ],
+  "workloads/wl-02": [
+    "target.yaml"
+  ]
+}

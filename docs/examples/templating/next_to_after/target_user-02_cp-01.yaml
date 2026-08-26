@@ -5,6 +5,12 @@ kind: Secret
 metadata:
   name: imagepull-cp-01
   namespace: user-02
+  labels:
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: imagepull-next-to
+    replica.core.open-control-plane.io/namespace: test-01
 type: kubernetes.io/dockerconfigjson
 data:
   .dockerconfigjson: eyJhdXRocyI6eyJnaGNyLmlvIjp7ImF1dGgiOiJzb21lYXV0aHRva2VuIn19fQ==

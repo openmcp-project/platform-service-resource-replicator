@@ -24,8 +24,12 @@ func SourceCondition(ref commonapi.TypedObjectReference) string {
 // TargetCondition generates a condition type for a created target.
 // For uniqueness, the type must contain GVK and namespace + name of the target resource, as well as the Cluster the target lives on.
 func TargetCondition(clusterRef commonapi.ObjectReference, ref commonapi.TypedObjectReference) string {
+	clusterRefString := namespacedNameForConType(clusterRef.NamespacedName())
+	if clusterRef.Name == "" && clusterRef.Namespace == "" {
+		clusterRefString = "HostingPlatformCluster"
+	}
 	// the limit for condition types seems to be a little bit more than 300
-	return ctrlutils.ShortenToXCharactersUnsafe(fmt.Sprintf("%s%s_%s_%s", repv1alpha1.ConditionTypeTargetPrefix, namespacedNameForConType(clusterRef.NamespacedName()), namespacedNameForConType(ref.NamespacedName()), gvkForConType(ref.GroupVersionKind)), 300)
+	return ctrlutils.ShortenToXCharactersUnsafe(fmt.Sprintf("%s%s_%s_%s", repv1alpha1.ConditionTypeTargetPrefix, clusterRefString, namespacedNameForConType(ref.NamespacedName()), gvkForConType(ref.GroupVersionKind)), 300)
 }
 
 // ClusterCondition generates a condition type for a specific cluster.
@@ -39,7 +43,7 @@ func ClusterCondition(clusterRef commonapi.ObjectReference) string {
 }
 
 func gvkForConType(gvk metav1.GroupVersionKind) string {
-	return fmt.Sprintf("%s.%s.%s", gvk.Kind, gvk.Version, gvk.Group)
+	return strings.TrimSuffix(fmt.Sprintf("%s.%s.%s", gvk.Kind, gvk.Version, gvk.Group), ".")
 }
 
 func namespacedNameForConType(nn types.NamespacedName) string {

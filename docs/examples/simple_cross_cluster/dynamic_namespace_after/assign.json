@@ -1,0 +1,9 @@
+{
+  "workloads/wl-01": [
+    "target_dynamic1.yaml",
+    "target_dynamic2.yaml"
+  ],
+  "workloads/wl-02": [
+    "target_dynamic3.yaml"
+  ]
+}

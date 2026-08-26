@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
@@ -13,6 +14,7 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/logging"
 	clusterctrl "github.com/openmcp-project/multicluster-provider/pkg/cluster"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
+	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
 	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
 
 	repv1alpha1 "github.com/openmcp-project/platform-service-resource-replicator/api/core/v1alpha1"
@@ -24,15 +26,48 @@ import (
 // If the given selector is nil, all clusters are considered to be relevant, only the matching ones otherwise.
 func New(selector clustersv1alpha1.Selector) *ClusterHandler {
 	return &ClusterHandler{
-		selector: selector,
+		selector:      selector,
+		clusterStates: map[commonapi.ObjectReference]clusterState{},
 	}
 }
 
 type ClusterHandler struct {
-	selector clustersv1alpha1.Selector
+	selector      clustersv1alpha1.Selector
+	clusterStates map[commonapi.ObjectReference]clusterState
 }
 
 var _ clusterctrl.ClusterHandler = &ClusterHandler{}
+
+// clusterState holds the relevant parts of a Cluster resource's state.
+// This is used to avoid unnecessary re-enqueues of Replica resources when a cluster is reconciled but its relevant state has not changed.
+type clusterState struct {
+	annotations map[string]string // required because it can be used in templating
+	labels      map[string]string // required because it can be used in templating
+	inDeletion  bool
+	generation  int64
+}
+
+func (c *ClusterHandler) clusterStateChanged(cluster *clustersv1alpha1.Cluster) bool {
+	if cluster == nil {
+		return true
+	}
+	ref := commonapi.ReferenceFromObject(cluster)
+	old, ok := c.clusterStates[ref]
+	if !ok {
+		return true
+	}
+	newState := clusterState{
+		annotations: cluster.Annotations,
+		labels:      cluster.Labels,
+		inDeletion:  !cluster.DeletionTimestamp.IsZero(),
+		generation:  cluster.Generation,
+	}
+	if !reflect.DeepEqual(old, newState) {
+		c.clusterStates[ref] = newState
+		return true
+	}
+	return false
+}
 
 // IsResponsibleFor implements [cluster.ClusterHandler].
 func (c *ClusterHandler) IsResponsibleFor(ctx context.Context, req mcreconcile.Request, platformClient client.Client, cluster *clustersv1alpha1.Cluster) bool {
@@ -44,7 +79,11 @@ func (c *ClusterHandler) IsResponsibleFor(ctx context.Context, req mcreconcile.R
 
 // HandleCreateOrUpdate implements [cluster.ClusterHandler].
 func (c *ClusterHandler) HandleCreateOrUpdate(ctx context.Context, req mcreconcile.Request, platformClient client.Client, cluster *clustersv1alpha1.Cluster, access cluster.Cluster) (reconcile.Result, error) {
-	return reconcile.Result{}, c.enqueueAllReplicasForCluster(ctx, platformClient, cluster)
+	var err error
+	if c.clusterStateChanged(cluster) {
+		err = c.enqueueAllReplicasForCluster(ctx, platformClient, cluster)
+	}
+	return reconcile.Result{}, err
 }
 
 // HandleDelete implements [cluster.ClusterHandler].
@@ -54,7 +93,7 @@ func (c *ClusterHandler) HandleDelete(ctx context.Context, req mcreconcile.Reque
 
 // AfterDeletion implements [cluster.ClusterHandler].
 func (c *ClusterHandler) AfterDeletion(ctx context.Context, req mcreconcile.Request, platformClient client.Client) (reconcile.Result, error) {
-	// nothing to do
+	delete(c.clusterStates, commonapi.ObjectReference{Namespace: req.Namespace, Name: req.Name})
 	return reconcile.Result{}, nil
 }
 
@@ -92,7 +131,13 @@ func (c *ClusterHandler) enqueueAllReplicasForCluster(ctx context.Context, platf
 		repStatus := rep.GetStatus()
 		for _, copyWithType := range repStatus.Replicas {
 			for _, copy := range copyWithType.Resources {
-				if copy.Cluster != nil && copy.Cluster.Namespace == cluster.Namespace && copy.Cluster.Name == cluster.Name {
+				// clusterMatch checks if there is a resource copy on the given cluster
+				clusterMatch := copy.Cluster != nil && copy.Cluster.Namespace == cluster.Namespace && copy.Cluster.Name == cluster.Name
+				// nextToMatch checks if the resource copy lives on the hosting platform cluster next to the given Cluster resource
+				nextToMatch := copy.Cluster == nil && copy.Namespace == cluster.Namespace
+				// isClusterScoped checks if the resource copy is cluster-scoped (i.e. has no namespace)
+				isClusterScoped := copy.Namespace == ""
+				if isClusterScoped && clusterMatch || nextToMatch {
 					if rep.GetNamespace() == "" {
 						log.Debug("Enqueuing ClusterReplica", "replica", rep.GetName(), "causingCopy", fmt.Sprintf("[%s]%s/%s", copyWithType.Type.String(), copy.Namespace, copy.Name))
 					} else {

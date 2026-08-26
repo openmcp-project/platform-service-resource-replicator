@@ -8,6 +8,11 @@ metadata:
   namespace: foo
   labels:
     app: foo
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: simple
+    replica.core.open-control-plane.io/namespace: test-01
   annotations:
     foo.bar.baz/ann: "true"
 type: Opaque

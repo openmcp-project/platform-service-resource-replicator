@@ -1,0 +1,12 @@
+# This file has no 'cluster_' prefix on purpose, because it represents the hosting platform cluster itself.
+apiVersion: clusters.openmcp.cloud/v1alpha1
+kind: Cluster
+metadata:
+  name: platform
+  namespace: openmcp-system
+spec:
+  kubernetes: {}
+  profile: test
+  purposes:
+  - platform
+  tenancy: Shared
