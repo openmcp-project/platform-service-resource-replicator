@@ -214,7 +214,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 	var rawTemplate string
 	if rr.Object.GetSpec().Template != nil {
 		var err error
-		rawTemplate = string(*rr.Object.GetSpec().Template)
+		rawTemplate = rr.Object.GetSpec().Template.String()
 		tmpl, err = gotmpl.New("").Funcs(sprig.FuncMap()).Funcs(gotmpl.FuncMap{
 			"toYaml": func(v any) (string, error) {
 				b, err := yaml.Marshal(v)

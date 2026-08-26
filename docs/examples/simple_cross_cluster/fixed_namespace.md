@@ -156,6 +156,14 @@ status:
     reason: SourceRead
     status: "True"
     type: Source_foo.cryptic_Secret.v1
+  - message: "Target resource 'bar/cryptic' (/v1, Kind=Secret) successfully synced to cluster 'workloads/wl-01'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_workloads.wl-01_bar.cryptic_Secret.v1
+  - message: "Target resource 'bar/cryptic' (/v1, Kind=Secret) successfully synced to cluster 'workloads/wl-02'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_workloads.wl-02_bar.cryptic_Secret.v1
   replicas:
   - type:
       group: ""

@@ -298,6 +298,7 @@ spec:
                       description: |-
                         NamespacePolicy specifies what to do if the target namespace does not exist.
                         Has no effect if the rendered template results in a cluster-scoped resource.
+                        If the namespaces are identified via a namespace selector, this only has an effect if 'matchIdentities' is used, otherwise only existing namespaces will be selected.
                         Valid values are:
                         - Create (default)
                             The target namespace will be created if it does not exist.
@@ -364,7 +365,7 @@ spec:
                       - purposes: spec.purposes of the Cluster resource.
                     - namespace: Namespace of the target resource. Only available if a namespace selector is specified in the target definition; not set if the namespace is computed by the template itself.
                   - replica: Metadata information about this Replica resource. Contains fields for name, namespace, labels, and annotations.
-                type: string
+                type: object
             required:
             - sources
             - targets

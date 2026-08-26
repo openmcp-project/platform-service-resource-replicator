@@ -10,30 +10,50 @@ import (
 	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
 )
 
-// RawTemplate is a string that can be unmarshaled from either a JSON string or a JSON object/array (stored as raw JSON).
-type RawTemplate string
+// RawTemplate can be unmarshaled from either a JSON string or a JSON object/array.
+// When unmarshaled from an object/array, the original JSON is preserved so that it
+// can be marshaled back into the same form instead of a plain string.
+type RawTemplate struct {
+	// value is the YAML string used by the template engine.
+	value string `json:"-"`
+	// rawJSON is the original JSON bytes when unmarshaled from an object/array; nil for plain strings.
+	rawJSON []byte `json:"-"`
+}
+
+// NewRawTemplate creates a RawTemplate from a plain string value.
+func NewRawTemplate(s string) RawTemplate {
+	return RawTemplate{value: s}
+}
+
+// String returns the YAML string representation used by the template engine.
+func (t RawTemplate) String() string {
+	return t.value
+}
 
 func (t *RawTemplate) UnmarshalJSON(data []byte) error {
 	// Try a plain JSON string first.
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
-		*t = RawTemplate(s)
+		t.value = s
+		t.rawJSON = nil
 		return nil
 	}
-	// It's a JSON object or array, convert it to YAML and store it as a string.
-	// Converting to YAML has two advantages:
-	// 1. The template looks more similar to full-string-templates, which are likely specified in YAML format.
-	// 2. YAML is less likely to contain stacked curly braces, which would interfere with the templating.
+	// It's a JSON object or array: convert to YAML for the template engine,
+	// and preserve the original JSON so MarshalJSON can round-trip the struct form.
 	yamlData, err := yaml.JSONToYAML(data)
 	if err != nil {
 		return err
 	}
-	*t = RawTemplate(yamlData)
+	t.value = string(yamlData)
+	t.rawJSON = append([]byte(nil), data...)
 	return nil
 }
 
 func (t RawTemplate) MarshalJSON() ([]byte, error) {
-	return json.Marshal(string(t))
+	if t.rawJSON != nil {
+		return t.rawJSON, nil
+	}
+	return json.Marshal(t.value)
 }
 
 // +kubebuilder:validation:XValidation:rule="has(self.template) || size(self.sources) == 1",message="template is required when sources has more than one entry"

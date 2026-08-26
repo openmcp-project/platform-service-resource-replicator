@@ -183,6 +183,10 @@ status:
     reason: SourceRead
     status: "True"
     type: Source_infra.tls-cert_Secret.v1
+  - message: "Target resource 'test-01/combined' (/v1, Kind=Secret) successfully synced to cluster '<hosting-platform-cluster>'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_HostingPlatformCluster_test-01.combined_Secret.v1
   replicas:
   - type:
       group: ""

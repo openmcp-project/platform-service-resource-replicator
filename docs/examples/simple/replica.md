@@ -70,6 +70,11 @@ metadata:
   namespace: bar
   labels:
     app: foo
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: simple
+    replica.core.open-control-plane.io/namespace: test-01
   annotations:
     foo.bar.baz/ann: "true"
 type: Opaque
@@ -122,6 +127,10 @@ status:
     reason: SourceRead
     status: "True"
     type: Source_foo.cryptic_Secret.v1
+  - message: "Target resource 'bar/cryptic' (/v1, Kind=Secret) successfully synced to cluster '<hosting-platform-cluster>'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_HostingPlatformCluster_bar.cryptic_Secret.v1
   replicas:
   - type:
       group: ""
