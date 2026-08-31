@@ -15,6 +15,7 @@ metadata:
   name: mycopy
   namespace: foo
 spec:
+  interval: 1h
   sources:
   - id: main
     group: ""
@@ -93,6 +94,12 @@ Source resources are referenced under `spec.sources`.
 Sources consist of a unique `id`, which is used to reference the source in the template. Apart from that, each source specifies GVK and `name` and `namespace`. `namespace` must be empty for cluster-scoped resources.
 
 There has to be at least one source.
+
+### Interval
+
+Replicas are automatically reconciled whenever they are modified or get the `openmcp.cloud/operation: reconcile` annotation. The replica controller does not actively watch the sources, though. To keep the copies updated, `spec.interval` allows to specify the interval for periodic reconciliations of the replica.
+
+The default interval is one hour (`1h`). Set the field to a zero duration to disable periodic reconciliation.
 
 ### Template
 

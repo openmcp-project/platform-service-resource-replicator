@@ -8,7 +8,7 @@ import (
 // +kubebuilder:resource:scope=Cluster,shortName=clusterrep;crep
 // +kubebuilder:metadata:labels="openmcp.cloud/cluster=platform"
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:JSONPath=`.metadata.annotations.replica\.core\.open-control-plane\.io/target-kind`,name="Target-Kind",type=string
+// +kubebuilder:printcolumn:JSONPath=`.status.phase`,name="Phase",type=string
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 type ClusterReplica struct {
 	metav1.TypeMeta   `json:",inline"`

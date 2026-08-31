@@ -95,6 +95,12 @@ type ReplicaSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=10
 	Targets []TargetDefinition `json:"targets"`
+
+	// Interval specifies how often the replica should be reconciled.
+	// It is automatically reconciled when modified, but changes to the source resources are not automatically detected, so a periodic reconciliation is required to keep the replica up to date.
+	// The default is 1h, set it to 0 to disable periodic reconciliation.
+	// +optional
+	Interval *metav1.Duration `json:"interval,omitempty"`
 }
 
 type ReferenceWithID struct {

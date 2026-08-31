@@ -103,6 +103,17 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Reque
 		Build().
 		UpdateStatus(ctx, platformCluster.GetClient(), rr)
 
+	// if the (Cluster)Replica was fetched and has an interval set, requeue after the interval
+	if err == nil && rr.Object != nil {
+		interval := rr.Object.GetSpec().GetInterval()
+		if interval > 0 && (res.RequeueAfter == 0 || res.RequeueAfter > interval) {
+			res.RequeueAfter = interval
+		}
+	}
+	if res.RequeueAfter > 0 {
+		log.Debug("Requeuing (Cluster)Replica", "requeueAfter", res.RequeueAfter, "requeueAt", time.Now().Add(res.RequeueAfter).Format(time.RFC3339))
+	}
+
 	return res, err
 }
 

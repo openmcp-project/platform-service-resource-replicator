@@ -196,7 +196,7 @@ var _ = Describe("ReplicaController", Serial, func() {
 					for range 5 {
 						rr, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
 						Expect(err).ToNot(HaveOccurred())
-						if rr.RequeueAfter == 0 {
+						if rr.RequeueAfter == rep.GetSpec().GetInterval() {
 							success = true
 							break
 						}

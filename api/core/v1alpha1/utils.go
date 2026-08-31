@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -203,4 +205,12 @@ type ReplicaEquivalent interface {
 	// NamespacedName returns a string containing namespace (in case of Replica) and name of the replica.
 	// Format is '<namespace/name>' for Replica and '<name>' for ClusterReplica.
 	NamespacedName() string
+}
+
+// GetInterval returns the interval for the replica, or the default of 1h if not set.
+func (rs *ReplicaSpec) GetInterval() time.Duration {
+	if rs.Interval == nil {
+		return time.Hour
+	}
+	return rs.Interval.Duration
 }

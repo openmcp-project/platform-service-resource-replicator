@@ -7,6 +7,7 @@ package v1alpha1
 import (
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -314,6 +315,11 @@ func (in *ReplicaSpec) DeepCopyInto(out *ReplicaSpec) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.Interval != nil {
+		in, out := &in.Interval, &out.Interval
+		*out = new(v1.Duration)
+		**out = **in
 	}
 }
 
