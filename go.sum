@@ -155,6 +155,8 @@ github.com/openmcp-project/controller-utils v0.31.1-0.20260825092024-c4d1028b6ea
 github.com/openmcp-project/controller-utils v0.31.1-0.20260825092024-c4d1028b6ea2/go.mod h1:sdwBJ6+HLWqbUPUr0OqI19FzDMWVv6rdVu8CRFat9N8=
 github.com/openmcp-project/multicluster-provider v0.0.0-20260825121908-ad0edad2c98c h1:SfjIwqkbhTv7ZGqVRj1FwCP4t9a3hP2ve5wf7J4JZHk=
 github.com/openmcp-project/multicluster-provider v0.0.0-20260825121908-ad0edad2c98c/go.mod h1:4siemqHosVEldNAOoLyq17hwaXEA7ung/N8wlNwCPkY=
+github.com/openmcp-project/multicluster-provider v0.0.0-20260831140413-b84e9690f802 h1:2HDI/fP3izCUQXtxMZizkr6nMkof2Vt/Gh4vjIWz5+A=
+github.com/openmcp-project/multicluster-provider v0.0.0-20260831140413-b84e9690f802/go.mod h1:IsCoR75AkTV88PjO6+gUgcDMyt9I8sEmRf97Sic3+GM=
 github.com/openmcp-project/openmcp-operator/api v1.3.1-0.20260818105456-b3f0f5d8220a h1:JcfgxzoKUG1qi5ZjQbD6KKT59gq0yAaQfukAIZ8mStg=
 github.com/openmcp-project/openmcp-operator/api v1.3.1-0.20260818105456-b3f0f5d8220a/go.mod h1:faLAi6HzVkZrhrkyITJmSI/PhMFAwmBWrh718DN1TgU=
 github.com/openmcp-project/openmcp-operator/lib v1.3.0 h1:Icx40/Qx/85+E8vWTMi1jW1WrX/MFN+FaZTDt7JWcRU=
