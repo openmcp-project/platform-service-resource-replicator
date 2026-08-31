@@ -1,4 +1,4 @@
-// nolint:goconst
+// nolint:goconst,prealloc
 package replica_test
 
 import (
@@ -140,7 +140,7 @@ func exampleTestSetup(exampleDirPrefix, exampleName, envSetupDir string) (*testu
 		if name == platformCluster {
 			cName = provider.HostingPlatformCluster
 		}
-		prov.Add(env.Ctx, cName, fake.NewCluster(scheme, fake.WithClient(cl)))
+		Expect(prov.Add(env.Ctx, cName, fake.NewCluster(scheme, fake.WithClient(cl)))).To(Succeed())
 	}
 
 	ctrl := replica.NewReplicaController(prov, providerName, nil)
@@ -179,14 +179,14 @@ var _ = Describe("ReplicaController", Serial, func() {
 				env, _, ctrl, validationObjects := exampleTestSetup(exampleDirPrefix, exampleName, envSetupDir)
 
 				// Reconcile all Replica and ClusterReplica resources in the platform cluster
-				replicas := []repv1alpha1.ReplicaEquivalent{}
 				cReps := &repv1alpha1.ClusterReplicaList{}
 				Expect(env.Client(platformCluster).List(env.Ctx, cReps)).To(Succeed())
+				reps := &repv1alpha1.ReplicaList{}
+				Expect(env.Client(platformCluster).List(env.Ctx, reps)).To(Succeed())
+				replicas := make([]repv1alpha1.ReplicaEquivalent, 0, len(cReps.Items)+len(reps.Items))
 				for _, cr := range cReps.Items {
 					replicas = append(replicas, &cr)
 				}
-				reps := &repv1alpha1.ReplicaList{}
-				Expect(env.Client(platformCluster).List(env.Ctx, reps)).To(Succeed())
 				for _, r := range reps.Items {
 					replicas = append(replicas, &r)
 				}
