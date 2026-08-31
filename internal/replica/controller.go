@@ -74,7 +74,7 @@ type ReconcileResult = ctrlutils.ReconcileResult[repv1alpha1.ReplicaEquivalent]
 
 // Reconcile implements [reconcile.TypedReconciler].
 func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Request) (reconcile.Result, error) {
-	log := logging.FromContextOrPanic(ctx).WithName(ControllerName)
+	log := logging.FromContextOrPanic(ctx).WithName(ControllerName).WithValues("name", req.Name, "namespace", req.Namespace) // for some reason, name and namespace are not injected into the logger by the multicluster-runtime, so we do it here manually
 	ctx = logging.NewContext(ctx, log)
 	log.Info("Starting reconcile")
 
