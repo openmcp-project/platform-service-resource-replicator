@@ -91,7 +91,9 @@ type ReplicaSpec struct {
 	// Targets is a list of targets where replicas should be created.
 	// Note that a single target can also resolve to multiple actual targets, e.g. if a cluster selector matches multiple clusters.
 	// Targets should be disjunct, multiple target definitions causing the same target resource to be created will result in an error.
+	// This is limited to 10 target definitions for now, as an unlimited list breaks the validation.
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=10
 	Targets []TargetDefinition `json:"targets"`
 }
 
