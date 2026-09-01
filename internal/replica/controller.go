@@ -942,7 +942,10 @@ func replicaPredicates() predicate.Predicate {
 			// - the (Cluster)Replica just lost the reconcile annotation (because this very likely happened as a result of a reconciliation, and we don't want to trigger another one immediately after)
 			predicate.Or(
 				ctrlutils.HasAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
-				ctrlutils.LostAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueReconcile),
+				predicate.And(
+					ctrlutils.OnUpdatePredicate(),
+					ctrlutils.LostAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueReconcile),
+				),
 			),
 		),
 	)
