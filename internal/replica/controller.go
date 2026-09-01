@@ -893,6 +893,7 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, cluster
 			rr.Object.GetStatus().Replicas.RemoveRaw(res.GroupVersionKind, res.Namespace, res.Name, &clusterRef)
 		}
 	}
+	rr.Object.GetStatus().Replicas.Cleanup()
 
 	errs.Append(rr.ReconcileError)
 	rr.ReconcileError = errs.Aggregate()

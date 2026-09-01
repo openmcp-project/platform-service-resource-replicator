@@ -190,6 +190,20 @@ func (l CreatedResourcesWithTypeList) Contains(gvk metav1.GroupVersionKind, res 
 	return false
 }
 
+// Cleanup removes all empty entries from the list (i.e. entries with no resources).
+func (l *CreatedResourcesWithTypeList) Cleanup() {
+	if l == nil {
+		return
+	}
+	result := (*l)[:0]
+	for _, entry := range *l {
+		if len(entry.Resources) > 0 {
+			result = append(result, entry)
+		}
+	}
+	*l = result
+}
+
 // +kubebuilder:object:generate=false
 type ReplicaEquivalent interface {
 	client.Object
