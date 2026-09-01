@@ -77,6 +77,7 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Reque
 	log := logging.FromContextOrPanic(ctx).WithName(ControllerName).WithValues("name", req.Name, "namespace", req.Namespace) // for some reason, name and namespace are not injected into the logger by the multicluster-runtime, so we do it here manually
 	ctx = logging.NewContext(ctx, log)
 	log.Info("Starting reconcile")
+	shared.SharedInformation().ClearPending(req.NamespacedName)
 
 	platformCluster, err := c.provider.Get(ctx, req.ClusterName)
 	if err != nil {
