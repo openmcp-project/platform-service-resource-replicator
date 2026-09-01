@@ -3,10 +3,12 @@ package namespace
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
@@ -148,13 +150,21 @@ func (c *NamespaceController) replicaIsRelevantForNamespaceEvent(ctx context.Con
 }
 
 func (c *NamespaceController) SetupWithMulticlusterManager(mgr mcmanager.Manager) error {
+	startTime := time.Now()
 	return mcbuilder.ControllerManagedBy(mgr).
 		For(&corev1.Namespace{},
 			mcbuilder.WithEngageWithLocalCluster(true),
 			mcbuilder.WithEngageWithProviderClusters(true),
 			mcbuilder.WithPredicates(predicate.Or(
-				ctrlutils.OnCreatePredicate(),
-				predicate.LabelChangedPredicate{},
+				// only react to namespaces that were created after this controller started up,
+				// to avoid triggering a reconcile storm for all pre-existing namespaces on startup
+				predicate.Funcs{CreateFunc: func(e event.CreateEvent) bool {
+					return e.Object.GetCreationTimestamp().After(startTime)
+				}},
+				predicate.And(
+					ctrlutils.OnUpdatePredicate(),
+					predicate.LabelChangedPredicate{},
+				),
 			)),
 		).
 		Complete(c)
