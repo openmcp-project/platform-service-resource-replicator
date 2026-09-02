@@ -26,11 +26,6 @@ import (
 	"github.com/openmcp-project/platform-service-resource-replicator/internal/replica"
 )
 
-const (
-	providerName    = "replica"
-	platformCluster = "platform"
-)
-
 // exampleTestSetup takes a parent directory and an example directory prefix. It expects the parent directory to contain a <prefix>_before and <prefix>_after directory.
 // It loads all *.yaml files from the <parent>/<prefix>_before directory into a fake platform client, and returns a ReplicaController.
 // All *.yaml files from the <parent>/<prefix>_after directory are returned as a mapping from cluster name to list of client.Object for comparison in the test.

@@ -1,0 +1,19 @@
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: test-replica-skip
+  namespace: test-ns
+spec:
+  sources:
+  - id: source
+    group: ""
+    version: v1
+    kind: Secret
+    name: source-secret
+    namespace: test-ns
+  targets:
+  - namespace:
+      selector:
+        matchIdentities:
+        - name: target-ns
+    targetConflictPolicy: Skip

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: source-secret
+  namespace: target-ns-owned-by-other
+  labels:
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: some-other-replica
+    replica.core.open-control-plane.io/namespace: test-ns
+type: Opaque
+data:
+  other: ZGF0YQ==
