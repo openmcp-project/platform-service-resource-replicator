@@ -40,7 +40,9 @@ import (
 //   - This causes the test to fail if the platform cluster does not contain a Cluster resource with the given namespace and name.
 //
 // Note that both, the platform and the onboarding cluster, will have corresponding Cluster resources created by default, in the openmcp-system namespace, with the name 'platform' and 'onboarding', respectively.
-func defaultTestSetup(testDataDirPathSegments ...string) (*testutils.ComplexEnvironment, multicluster.Provider, *replica.ReplicaController) {
+// Unless withClusterReplicas is false, a ClusterReplica is automatically created for every Replica resource found in the initial state,
+// with the name '<namespace>-<name>', an identical spec, and the same finalizers, labels, annotations, and status.
+func defaultTestSetup(withClusterReplicas bool, testDataDirPathSegments ...string) (*testutils.ComplexEnvironment, multicluster.Provider, *replica.ReplicaController) {
 	GinkgoHelper()
 	scheme := install.InstallOperatorAPIsPlatform(runtime.NewScheme())
 
@@ -103,6 +105,27 @@ func defaultTestSetup(testDataDirPathSegments ...string) (*testutils.ComplexEnvi
 	envb.WithDynamicObjectsWithStatus(platformCluster, &repv1alpha1.Replica{}, &repv1alpha1.ClusterReplica{})
 	env := envb.Build()
 
+	if withClusterReplicas {
+		reps := &repv1alpha1.ReplicaList{}
+		Expect(env.Client(platformCluster).List(env.Ctx, reps)).To(Succeed())
+		for _, rep := range reps.Items {
+			cr := &repv1alpha1.ClusterReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        rep.Namespace + "-" + rep.Name,
+					Labels:      rep.Labels,
+					Annotations: rep.Annotations,
+					Finalizers:  rep.Finalizers,
+				},
+				Spec:   *rep.Spec.DeepCopy(),
+				Status: *rep.Status.DeepCopy(),
+			}
+			Expect(env.Client(platformCluster).Create(env.Ctx, cr)).To(Succeed())
+			if len(cr.Status.Conditions) > 0 || len(cr.Status.Replicas) > 0 {
+				Expect(env.Client(platformCluster).Status().Update(env.Ctx, cr)).To(Succeed())
+			}
+		}
+	}
+
 	prov := fake.NewProvider()
 	for name, cl := range env.Clusters {
 		cName := multicluster.ClusterName(name)
@@ -117,6 +140,21 @@ func defaultTestSetup(testDataDirPathSegments ...string) (*testutils.ComplexEnvi
 	return env, prov, ctrl
 }
 
+// getReplicaEquivalent fetches a Replica or ClusterReplica resource by name and kind.
+// For Replica resources, the namespace is used; for ClusterReplica resources, it is ignored
+// and the name is constructed as '<namespace>-<name>'.
+func getReplicaEquivalent(env *testutils.ComplexEnvironment, namespace, name, kind string) repv1alpha1.ReplicaEquivalent {
+	GinkgoHelper()
+	if kind == repv1alpha1.KindReplica {
+		rep := &repv1alpha1.Replica{}
+		Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: namespace, Name: name}, rep)).To(Succeed())
+		return rep
+	}
+	cr := &repv1alpha1.ClusterReplica{}
+	Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Name: namespace + "-" + name}, cr)).To(Succeed())
+	return cr
+}
+
 func findConditionWithPrefix(conditions []metav1.Condition, prefix string) (metav1.Condition, bool) {
 	for _, c := range conditions {
 		if strings.HasPrefix(c.Type, prefix) {
@@ -128,127 +166,134 @@ func findConditionWithPrefix(conditions []metav1.Condition, prefix string) (meta
 
 var _ = Describe("Replica Controller", func() {
 
-	Context("TargetConflictPolicy", func() {
+	for _, replicaKind := range []string{repv1alpha1.KindReplica, repv1alpha1.KindClusterReplica} {
+		withClusterReplicas := replicaKind == repv1alpha1.KindClusterReplica
 
-		It("should fail when the target already exists and the policy is 'Fail'", func() {
-			env, _, ctrl := defaultTestSetup("testdata", "test-01")
+		Context(replicaKind, func() {
 
-			rep := &repv1alpha1.Replica{}
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "test-ns", Name: "test-replica-fail"}, rep)).To(Succeed())
+			Context("TargetConflictPolicy", func() {
 
-			_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
-			Expect(err).To(HaveOccurred())
-			var reasonableErr errutils.ReasonableError
-			Expect(errors.As(err, &reasonableErr)).To(BeTrue(), "expected error to implement ReasonableError")
-			Expect(reasonableErr.Reason()).To(Equal(cconst.ReasonConfigurationProblem))
-			Expect(reasonableErr.Error()).To(ContainSubstring("already exists and is not owned by this (Cluster)Replica"))
+				It("should fail when the target already exists and the policy is 'Fail'", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-01")
 
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKeyFromObject(rep), rep)).To(Succeed())
-			conflictCondition, found := findConditionWithPrefix(rep.Status.Conditions, repv1alpha1.ConditionTypeTargetPrefix)
-			Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
-			Expect(conflictCondition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(conflictCondition.Reason).To(Equal(cconst.ReasonConfigurationProblem))
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-fail", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).To(HaveOccurred())
+					var reasonableErr errutils.ReasonableError
+					Expect(errors.As(err, &reasonableErr)).To(BeTrue(), "expected error to implement ReasonableError")
+					Expect(reasonableErr.Reason()).To(Equal(cconst.ReasonConfigurationProblem))
+					Expect(reasonableErr.Error()).To(ContainSubstring("already exists and is not owned by this (Cluster)Replica"))
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-fail", replicaKind)
+					conflictCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(conflictCondition.Status).To(Equal(metav1.ConditionFalse))
+					Expect(conflictCondition.Reason).To(Equal(cconst.ReasonConfigurationProblem))
+				})
+
+				It("should skip the target without error when it already exists and the policy is 'Skip'", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-01")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-skip", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-skip", replicaKind)
+					skipCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(skipCondition.Status).To(Equal(metav1.ConditionTrue))
+					Expect(skipCondition.Reason).To(Equal(repv1alpha1.ConditionReasonTargetSkipped))
+
+					existing := &corev1.Secret{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, existing)).To(Succeed())
+					Expect(existing.Data).To(HaveKey("other"), "pre-existing target should not have been modified")
+					Expect(existing.Data).ToNot(HaveKey("key"), "pre-existing target should not have been modified")
+				})
+
+				It("should overwrite the target without error when it already exists and the policy is 'Overwrite'", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-01")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-overwrite", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-overwrite", replicaKind)
+					overwriteCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(overwriteCondition.Status).To(Equal(metav1.ConditionTrue))
+					Expect(overwriteCondition.Reason).To(Equal(repv1alpha1.ConditionReasonTargetSynced))
+
+					overwritten := &corev1.Secret{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, overwritten)).To(Succeed())
+					Expect(overwritten.Data).To(HaveKey("key"), "target should have been overwritten with source data")
+					Expect(overwritten.Data).ToNot(HaveKey("other"), "target should have been overwritten with source data")
+					Expect(overwritten.Labels).To(HaveKeyWithValue(openmcpconst.ManagedByLabel, providerName))
+					Expect(overwritten.Labels).To(HaveKeyWithValue(repv1alpha1.ReplicaSourceKindLabel, strings.ToLower(replicaKind)))
+					Expect(overwritten.Labels).To(HaveKeyWithValue(repv1alpha1.ReplicaSourceNameLabel, rep.GetName()))
+					if replicaKind == repv1alpha1.KindReplica {
+						Expect(overwritten.Labels).To(HaveKeyWithValue(repv1alpha1.ReplicaSourceNamespaceLabel, rep.GetNamespace()))
+					} else {
+						Expect(overwritten.Labels).ToNot(HaveKey(repv1alpha1.ReplicaSourceNamespaceLabel))
+					}
+
+					Expect(rep.GetStatus().Replicas).To(ContainElement(repv1alpha1.CreatedResourcesWithType{
+						Type: metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+						Resources: []repv1alpha1.CreatedResource{
+							{ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{Name: "source-secret", Namespace: "target-ns"}},
+						},
+					}))
+				})
+
+				It("should fail when the target already exists (in deletion) and the policy is 'Overwrite'", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-01")
+
+					preexisting := &corev1.Secret{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, preexisting)).To(Succeed())
+					controllerutil.AddFinalizer(preexisting, "test/block-deletion")
+					Expect(env.Client(platformCluster).Update(env.Ctx, preexisting)).To(Succeed())
+					Expect(env.Client(platformCluster).Delete(env.Ctx, preexisting)).To(Succeed())
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-overwrite-in-deletion", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).To(HaveOccurred())
+					var reasonableErr errutils.ReasonableError
+					Expect(errors.As(err, &reasonableErr)).To(BeTrue(), "expected error to implement ReasonableError")
+					Expect(reasonableErr.Reason()).To(Equal(repv1alpha1.ReasonTargetConflict))
+					Expect(reasonableErr.Error()).To(ContainSubstring("is in deletion"))
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-overwrite-in-deletion", replicaKind)
+					conflictCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(conflictCondition.Status).To(Equal(metav1.ConditionFalse))
+					Expect(conflictCondition.Reason).To(Equal(repv1alpha1.ReasonTargetConflict))
+				})
+
+				It("should fail when the target already exists (owned by another Replica) and the policy is 'Overwrite'", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-01")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-overwrite-owned-by-other", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).To(HaveOccurred())
+					var reasonableErr errutils.ReasonableError
+					Expect(errors.As(err, &reasonableErr)).To(BeTrue(), "expected error to implement ReasonableError")
+					Expect(reasonableErr.Reason()).To(Equal(repv1alpha1.ReasonTargetConflict))
+					Expect(reasonableErr.Error()).To(ContainSubstring("owned by other"))
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-overwrite-owned-by-other", replicaKind)
+					conflictCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(conflictCondition.Status).To(Equal(metav1.ConditionFalse))
+					Expect(conflictCondition.Reason).To(Equal(repv1alpha1.ReasonTargetConflict))
+				})
+
+			})
+
 		})
-
-		It("should skip the target without error when it already exists and the policy is 'Skip'", func() {
-			env, _, ctrl := defaultTestSetup("testdata", "test-01")
-
-			rep := &repv1alpha1.Replica{}
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "test-ns", Name: "test-replica-skip"}, rep)).To(Succeed())
-
-			_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
-			Expect(err).ToNot(HaveOccurred())
-
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKeyFromObject(rep), rep)).To(Succeed())
-			skipCondition, found := findConditionWithPrefix(rep.Status.Conditions, repv1alpha1.ConditionTypeTargetPrefix)
-			Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
-			Expect(skipCondition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(skipCondition.Reason).To(Equal(repv1alpha1.ConditionReasonTargetSkipped))
-
-			existing := &corev1.Secret{}
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, existing)).To(Succeed())
-			Expect(existing.Data).To(HaveKey("other"), "pre-existing target should not have been modified")
-			Expect(existing.Data).ToNot(HaveKey("key"), "pre-existing target should not have been modified")
-		})
-
-		It("should overwrite the target without error when it already exists and the policy is 'Overwrite'", func() {
-			env, _, ctrl := defaultTestSetup("testdata", "test-01")
-
-			rep := &repv1alpha1.Replica{}
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "test-ns", Name: "test-replica-overwrite"}, rep)).To(Succeed())
-
-			_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
-			Expect(err).ToNot(HaveOccurred())
-
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKeyFromObject(rep), rep)).To(Succeed())
-			overwriteCondition, found := findConditionWithPrefix(rep.Status.Conditions, repv1alpha1.ConditionTypeTargetPrefix)
-			Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
-			Expect(overwriteCondition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(overwriteCondition.Reason).To(Equal(repv1alpha1.ConditionReasonTargetSynced))
-
-			overwritten := &corev1.Secret{}
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, overwritten)).To(Succeed())
-			Expect(overwritten.Data).To(HaveKey("key"), "target should have been overwritten with source data")
-			Expect(overwritten.Data).ToNot(HaveKey("other"), "target should have been overwritten with source data")
-			Expect(overwritten.Labels).To(HaveKeyWithValue(openmcpconst.ManagedByLabel, providerName))
-			Expect(overwritten.Labels).To(HaveKeyWithValue(repv1alpha1.ReplicaSourceKindLabel, strings.ToLower(repv1alpha1.KindReplica)))
-			Expect(overwritten.Labels).To(HaveKeyWithValue(repv1alpha1.ReplicaSourceNameLabel, rep.Name))
-			Expect(overwritten.Labels).To(HaveKeyWithValue(repv1alpha1.ReplicaSourceNamespaceLabel, rep.Namespace))
-
-			Expect(rep.Status.Replicas).To(ContainElement(repv1alpha1.CreatedResourcesWithType{
-				Type: metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
-				Resources: []repv1alpha1.CreatedResource{
-					{ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{Name: "source-secret", Namespace: "target-ns"}},
-				},
-			}))
-		})
-
-		It("should fail when the target already exists, but is in deletion, and the policy is 'Overwrite'", func() {
-			env, _, ctrl := defaultTestSetup("testdata", "test-01")
-
-			preexisting := &corev1.Secret{}
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, preexisting)).To(Succeed())
-			controllerutil.AddFinalizer(preexisting, "test/block-deletion")
-			Expect(env.Client(platformCluster).Update(env.Ctx, preexisting)).To(Succeed())
-			Expect(env.Client(platformCluster).Delete(env.Ctx, preexisting)).To(Succeed())
-
-			rep := &repv1alpha1.Replica{}
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "test-ns", Name: "test-replica-overwrite-in-deletion"}, rep)).To(Succeed())
-
-			_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
-			Expect(err).To(HaveOccurred())
-			var reasonableErr errutils.ReasonableError
-			Expect(errors.As(err, &reasonableErr)).To(BeTrue(), "expected error to implement ReasonableError")
-			Expect(reasonableErr.Reason()).To(Equal(repv1alpha1.ReasonTargetConflict))
-			Expect(reasonableErr.Error()).To(ContainSubstring("is in deletion"))
-
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKeyFromObject(rep), rep)).To(Succeed())
-			conflictCondition, found := findConditionWithPrefix(rep.Status.Conditions, repv1alpha1.ConditionTypeTargetPrefix)
-			Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
-			Expect(conflictCondition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(conflictCondition.Reason).To(Equal(repv1alpha1.ReasonTargetConflict))
-		})
-
-		It("should fail when the target already exists, but is owned by another Replica, and the policy is 'Overwrite'", func() {
-			env, _, ctrl := defaultTestSetup("testdata", "test-01")
-
-			rep := &repv1alpha1.Replica{}
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "test-ns", Name: "test-replica-overwrite-owned-by-other"}, rep)).To(Succeed())
-
-			_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
-			Expect(err).To(HaveOccurred())
-			var reasonableErr errutils.ReasonableError
-			Expect(errors.As(err, &reasonableErr)).To(BeTrue(), "expected error to implement ReasonableError")
-			Expect(reasonableErr.Reason()).To(Equal(repv1alpha1.ReasonTargetConflict))
-			Expect(reasonableErr.Error()).To(ContainSubstring("owned by other"))
-
-			Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKeyFromObject(rep), rep)).To(Succeed())
-			conflictCondition, found := findConditionWithPrefix(rep.Status.Conditions, repv1alpha1.ConditionTypeTargetPrefix)
-			Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
-			Expect(conflictCondition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(conflictCondition.Reason).To(Equal(repv1alpha1.ReasonTargetConflict))
-		})
-
-	})
+	}
 
 })
