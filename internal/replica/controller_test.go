@@ -293,6 +293,90 @@ var _ = Describe("Replica Controller", func() {
 
 			})
 
+			Context("NamespacePolicy", func() {
+
+				It("should fail when the target namespace does not exist and the policy is 'Fail'", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-02")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-ns-fail", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).To(HaveOccurred())
+					var reasonableErr errutils.ReasonableError
+					Expect(errors.As(err, &reasonableErr)).To(BeTrue(), "expected error to implement ReasonableError")
+					Expect(reasonableErr.Reason()).To(Equal(repv1alpha1.ReasonMissingNamespace))
+					Expect(reasonableErr.Error()).To(ContainSubstring("does not exist"))
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-ns-fail", replicaKind)
+					nsCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(nsCondition.Status).To(Equal(metav1.ConditionFalse))
+					Expect(nsCondition.Reason).To(Equal(repv1alpha1.ReasonMissingNamespace))
+				})
+
+				It("should skip without error when the target namespace does not exist and the policy is 'Skip'", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-02")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-ns-skip", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-ns-skip", replicaKind)
+					nsCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(nsCondition.Status).To(Equal(metav1.ConditionTrue))
+					Expect(nsCondition.Reason).To(Equal(repv1alpha1.ConditionReasonTargetSkipped))
+				})
+
+				It("should create the namespace and sync the target when the namespace does not exist and the policy is 'Create' (the default)", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-02")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-ns-create", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					createdNs := &corev1.Namespace{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Name: "target-ns"}, createdNs)).To(Succeed())
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-ns-create", replicaKind)
+					nsCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(nsCondition.Status).To(Equal(metav1.ConditionTrue))
+					Expect(nsCondition.Reason).To(Equal(repv1alpha1.ConditionReasonTargetSynced))
+
+					createdSecret := &corev1.Secret{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, createdSecret)).To(Succeed())
+				})
+
+				It("should fail when the target namespace is in deletion and the policy is 'Create' (the default)", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-02")
+
+					targetNs := &corev1.Namespace{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Name: "target-ns-deletion"}, targetNs)).To(Succeed())
+					controllerutil.AddFinalizer(targetNs, "test/block-deletion")
+					Expect(env.Client(platformCluster).Update(env.Ctx, targetNs)).To(Succeed())
+					Expect(env.Client(platformCluster).Delete(env.Ctx, targetNs)).To(Succeed())
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-ns-deletion", replicaKind)
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).To(HaveOccurred())
+					var reasonableErr errutils.ReasonableError
+					Expect(errors.As(err, &reasonableErr)).To(BeTrue(), "expected error to implement ReasonableError")
+					Expect(reasonableErr.Reason()).To(Equal(repv1alpha1.ReasonNamespaceInDeletion))
+					Expect(reasonableErr.Error()).To(ContainSubstring("is being deleted"))
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-ns-deletion", replicaKind)
+					nsCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
+					Expect(nsCondition.Status).To(Equal(metav1.ConditionFalse))
+					Expect(nsCondition.Reason).To(Equal(repv1alpha1.ReasonNamespaceInDeletion))
+				})
+
+			})
+
 		})
 	}
 

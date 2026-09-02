@@ -323,8 +323,9 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 				}
 
 				if targetDef.Namespace != nil && targetDef.Namespace.Selector != nil {
-					if targetDef.Namespace.Selector.MatchIdentities != nil && targetDef.GetNamespacePolicy() == repv1alpha1.NamespacePolicyCreate {
-						// If the namespaces are explicitly specified and the policy is Create, we can just use the specified namespaces and skip the listing of all namespaces in the cluster.
+					if targetDef.Namespace.Selector.MatchIdentities != nil {
+						// If the namespaces are explicitly specified by identity, we can use them directly and skip listing all namespaces in the cluster.
+						// The per-namespace existence check later handles missing namespaces according to the namespace policy.
 						for _, identity := range targetDef.Namespace.Selector.MatchIdentities {
 							targetNamespaces = append(targetNamespaces, identity.Name)
 						}

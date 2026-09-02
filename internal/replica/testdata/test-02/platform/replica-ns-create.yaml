@@ -1,0 +1,18 @@
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: test-replica-ns-create
+  namespace: test-ns
+spec:
+  sources:
+  - id: source
+    group: ""
+    version: v1
+    kind: Secret
+    name: source-secret
+    namespace: test-ns
+  targets:
+  - namespace:
+      selector:
+        matchIdentities:
+        - name: target-ns
