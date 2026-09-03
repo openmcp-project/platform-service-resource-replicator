@@ -10,7 +10,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.42.1
 	github.com/openmcp-project/controller-utils v0.31.1-0.20260825092024-c4d1028b6ea2
-	github.com/openmcp-project/multicluster-provider v0.0.0-20260831140413-b84e9690f802
+	github.com/openmcp-project/multicluster-provider v0.1.0
 	github.com/openmcp-project/openmcp-operator/api v1.3.1-0.20260818105456-b3f0f5d8220a
 	github.com/openmcp-project/platform-service-resource-replicator/api v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.10.2
