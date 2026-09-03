@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: source-secret
+  namespace: test-ns
+data:
+  key: dmFsdWU=

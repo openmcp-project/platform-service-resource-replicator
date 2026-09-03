@@ -1,0 +1,32 @@
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: test-replica-nextto-shared
+  namespace: test-ns
+  finalizers:
+  - replica.core.open-control-plane.io/finalizer
+spec:
+  sources:
+  - id: source
+    group: ""
+    version: v1
+    kind: Secret
+    name: source-secret
+    namespace: test-ns
+  targets:
+  - cluster:
+      selector:
+        matchPurposes:
+        - operator: ContainsAny
+          values:
+          - workload
+      location: NextTo
+status:
+  replicas:
+  - type:
+      group: ""
+      version: v1
+      kind: Secret
+    resources:
+    - name: source-secret
+      namespace: openmcp-system

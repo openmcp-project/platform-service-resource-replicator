@@ -635,6 +635,15 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 							delete(target.Object, k)
 						}
 					}
+					deletionPolicy, targetHasDeletionPolicyLabel := target.GetLabels()[repv1alpha1.ReplicaDeletionPolicyLabel]
+					_, renderedHasDeletionPolicyLabel := rendered.GetLabels()[repv1alpha1.ReplicaDeletionPolicyLabel]
+					if targetHasDeletionPolicyLabel && !renderedHasDeletionPolicyLabel {
+						// We should never remove a deletion policy label from a target resource, because it might have been added manually by a user.
+						// If the rendered template does not overwrite it, keep the existing label.
+						labels := rendered.GetLabels()
+						labels[repv1alpha1.ReplicaDeletionPolicyLabel] = deletionPolicy
+						rendered.SetLabels(labels)
+					}
 					target.SetLabels(rendered.GetLabels())
 					target.SetAnnotations(rendered.GetAnnotations())
 					return nil
@@ -865,6 +874,7 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, cluster
 					log.Debug("Resource has custom deletion policy", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind, "deletionPolicy", labels[repv1alpha1.ReplicaDeletionPolicyLabel])
 					// remove controller-owned labels instead of deleting the resource
 					old := rtd.DeepCopy()
+					delete(labels, openmcpconst.ManagedByLabel)
 					delete(labels, repv1alpha1.ReplicaSourceKindLabel)
 					delete(labels, repv1alpha1.ReplicaSourceNameLabel)
 					delete(labels, repv1alpha1.ReplicaSourceNamespaceLabel)
@@ -879,14 +889,19 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, cluster
 					}
 					log.Info("Kept target resource and removed management labels, according to deletion policy label", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
 				} else {
-					if err := access.GetClient().Delete(ctx, rtd); client.IgnoreNotFound(err) != nil {
-						rerr := errutils.WithReason(fmt.Errorf("unable to delete target resource '%s' (%s) in cluster '%s': %w", namespacedName(rtd), rtd.GetObjectKind().GroupVersionKind().String(), logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
-						errs.Append(rerr)
-						createCon(TargetCondition(clusterRef, res), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
-						continue
-					} else {
-						log.Info("Deleted target resource", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
+					if rtd.GetDeletionTimestamp().IsZero() {
+						if err := access.GetClient().Delete(ctx, rtd); client.IgnoreNotFound(err) != nil {
+							rerr := errutils.WithReason(fmt.Errorf("unable to delete target resource '%s' (%s) in cluster '%s': %w", namespacedName(rtd), rtd.GetObjectKind().GroupVersionKind().String(), logClusterName, err), repv1alpha1.ReasonTargetClusterInteractionProblem)
+							errs.Append(rerr)
+							createCon(TargetCondition(clusterRef, res), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
+							continue
+						} else {
+							log.Info("Deleted target resource", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
+						}
 					}
+					log.Debug("Waiting for target resource to be deleted", "cluster", logClusterName, "targetName", res.Name, "targetNamespace", res.Namespace, "targetGroup", res.Group, "targetVersion", res.Version, "targetKind", res.Kind)
+					createCon(TargetCondition(clusterRef, res), metav1.ConditionFalse, repv1alpha1.ConditionReasonWaitingForResourceDeletion, fmt.Sprintf("Waiting for target resource '%s' (%s) in cluster '%s' to be deleted", namespacedName(rtd), rtd.GetObjectKind().GroupVersionKind().String(), logClusterName))
+					continue
 				}
 			}
 

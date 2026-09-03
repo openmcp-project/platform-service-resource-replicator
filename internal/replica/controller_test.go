@@ -1,4 +1,4 @@
-// nolint:goconst,prealloc
+// nolint:goconst,prealloc,unparam
 package replica_test
 
 import (
@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -145,14 +147,21 @@ func defaultTestSetup(withClusterReplicas bool, testDataDirPathSegments ...strin
 // and the name is constructed as '<namespace>-<name>'.
 func getReplicaEquivalent(env *testutils.ComplexEnvironment, namespace, name, kind string) repv1alpha1.ReplicaEquivalent {
 	GinkgoHelper()
+	rep, err := getReplicaEquivalentWithError(env, namespace, name, kind)
+	Expect(err).ToNot(HaveOccurred(), "failed to get %s %s/%s: %v", kind, namespace, name, err)
+	return rep
+}
+
+func getReplicaEquivalentWithError(env *testutils.ComplexEnvironment, namespace, name, kind string) (repv1alpha1.ReplicaEquivalent, error) {
+	GinkgoHelper()
 	if kind == repv1alpha1.KindReplica {
 		rep := &repv1alpha1.Replica{}
-		Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: namespace, Name: name}, rep)).To(Succeed())
-		return rep
+		err := env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: namespace, Name: name}, rep)
+		return rep, err
 	}
 	cr := &repv1alpha1.ClusterReplica{}
-	Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Name: namespace + "-" + name}, cr)).To(Succeed())
-	return cr
+	err := env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Name: namespace + "-" + name}, cr)
+	return cr, err
 }
 
 func findConditionWithPrefix(conditions []metav1.Condition, prefix string) (metav1.Condition, bool) {
@@ -373,6 +382,234 @@ var _ = Describe("Replica Controller", func() {
 					Expect(found).To(BeTrue(), "expected a Target_* condition to be set")
 					Expect(nsCondition.Status).To(Equal(metav1.ConditionFalse))
 					Expect(nsCondition.Reason).To(Equal(repv1alpha1.ReasonNamespaceInDeletion))
+				})
+
+			})
+
+			Context("Deletion", func() {
+
+				It("should delete managed resources and remove the finalizer when the Replica is deleted", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-03")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-delete", replicaKind)
+
+					// Set management labels on the target secret to match the current replica kind and name.
+					targetSecret := &corev1.Secret{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, targetSecret)).To(Succeed())
+					targetSecret.Labels = map[string]string{
+						openmcpconst.ManagedByLabel:        providerName,
+						repv1alpha1.ReplicaSourceKindLabel: strings.ToLower(replicaKind),
+						repv1alpha1.ReplicaSourceNameLabel: rep.GetName(),
+					}
+					if replicaKind == repv1alpha1.KindReplica {
+						targetSecret.Labels[repv1alpha1.ReplicaSourceNamespaceLabel] = rep.GetNamespace()
+					}
+					Expect(env.Client(platformCluster).Update(env.Ctx, targetSecret)).To(Succeed())
+
+					// Block deletion of the target secret so we can observe the intermediate state.
+					controllerutil.AddFinalizer(targetSecret, "test/block-deletion")
+					Expect(env.Client(platformCluster).Update(env.Ctx, targetSecret)).To(Succeed())
+
+					Expect(env.Client(platformCluster).Delete(env.Ctx, rep)).To(Succeed())
+
+					// First reconcile: target secret deletion requested, requeue requested
+					res, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+					Expect(res.RequeueAfter).To(BeNumerically(">", 0))
+					Expect(res.RequeueAfter).To(BeNumerically("<=", time.Minute))
+
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, targetSecret)).To(Succeed())
+					Expect(targetSecret.DeletionTimestamp.IsZero()).To(BeFalse())
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-delete", replicaKind)
+					Expect(rep.GetStatus().Replicas).ToNot(BeEmpty())
+					targetCondition, found := findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeTrue(), "expected a Target_* condition indicating the target is being deleted")
+					Expect(targetCondition.Status).To(Equal(metav1.ConditionFalse))
+					Expect(targetCondition.Reason).To(Equal(repv1alpha1.ConditionReasonWaitingForResourceDeletion))
+
+					// Allow the target secret to be fully deleted, then reconcile again.
+					controllerutil.RemoveFinalizer(targetSecret, "test/block-deletion")
+					Expect(env.Client(platformCluster).Update(env.Ctx, targetSecret)).To(Succeed())
+
+					res, err = ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+					Expect(res.RequeueAfter).To(BeNumerically("<=", time.Minute))
+
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "source-secret"}, targetSecret)).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-delete", replicaKind)
+					Expect(rep.GetStatus().Replicas).To(BeEmpty())
+					_, found = findConditionWithPrefix(rep.GetStatus().Conditions, repv1alpha1.ConditionTypeTargetPrefix)
+					Expect(found).To(BeFalse(), "expected no Target_* condition to remain after managed resources are deleted")
+
+					// Final reconcile: finalizer removed
+					_, err = ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					rep, err = getReplicaEquivalentWithError(env, "test-ns", "test-replica-delete", replicaKind)
+					if err != nil {
+						Expect(err).To(MatchError(apierrors.IsNotFound, "IsNotFound"), "expected the Replica to be deleted after finalizer removal")
+					} else {
+						Expect(rep.GetFinalizers()).ToNot(ContainElement(repv1alpha1.ReplicaFinalizer))
+					}
+				})
+
+				It("should strip management labels from managed resources and remove the finalizer when the Replica is deleted and the retention policy is 'Keep'", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-03")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-retain", replicaKind)
+
+					// Set management labels and the Keep deletion policy on the target secret.
+					retainedSecret := &corev1.Secret{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "retained-secret"}, retainedSecret)).To(Succeed())
+					retainedSecret.Labels = map[string]string{
+						openmcpconst.ManagedByLabel:            providerName,
+						repv1alpha1.ReplicaSourceKindLabel:     strings.ToLower(replicaKind),
+						repv1alpha1.ReplicaSourceNameLabel:     rep.GetName(),
+						repv1alpha1.ReplicaDeletionPolicyLabel: repv1alpha1.ReplicaDeletionPolicyKeep,
+					}
+					if replicaKind == repv1alpha1.KindReplica {
+						retainedSecret.Labels[repv1alpha1.ReplicaSourceNamespaceLabel] = rep.GetNamespace()
+					}
+					Expect(env.Client(platformCluster).Update(env.Ctx, retainedSecret)).To(Succeed())
+
+					Expect(env.Client(platformCluster).Delete(env.Ctx, rep)).To(Succeed())
+
+					// Single reconcile: management labels stripped, secret kept, status cleared, finalizer removed on next pass
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "target-ns", Name: "retained-secret"}, retainedSecret)).To(Succeed())
+					Expect(retainedSecret.Labels).ToNot(HaveKey(openmcpconst.ManagedByLabel))
+					Expect(retainedSecret.Labels).ToNot(HaveKey(repv1alpha1.ReplicaSourceKindLabel))
+					Expect(retainedSecret.Labels).ToNot(HaveKey(repv1alpha1.ReplicaSourceNameLabel))
+					Expect(retainedSecret.Labels).ToNot(HaveKey(repv1alpha1.ReplicaSourceNamespaceLabel))
+					Expect(retainedSecret.Labels).ToNot(HaveKey(repv1alpha1.ReplicaDeletionPolicyLabel))
+					Expect(retainedSecret.DeletionTimestamp.IsZero()).To(BeTrue(), "retained secret should not be deleted")
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-retain", replicaKind)
+					Expect(rep.GetStatus().Replicas).To(BeEmpty())
+
+					// Second reconcile: finalizer removed
+					_, err = ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					rep, err = getReplicaEquivalentWithError(env, "test-ns", "test-replica-retain", replicaKind)
+					if err != nil {
+						Expect(err).To(MatchError(apierrors.IsNotFound, "IsNotFound"), "expected the Replica to be deleted after finalizer removal")
+					} else {
+						Expect(rep.GetFinalizers()).ToNot(ContainElement(repv1alpha1.ReplicaFinalizer))
+					}
+				})
+
+				It("should delete both the Onto and NextTo copies when the target Cluster is in deletion", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-04")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-cluster-delete", replicaKind)
+
+					// Set management labels on both managed copies.
+					ontoSecret := &corev1.Secret{}
+					Expect(env.Client("openmcp-system/workload-cluster").Get(env.Ctx, client.ObjectKey{Namespace: "test-ns", Name: "source-secret"}, ontoSecret)).To(Succeed())
+					ontoSecret.Labels = map[string]string{
+						openmcpconst.ManagedByLabel:        providerName,
+						repv1alpha1.ReplicaSourceKindLabel: strings.ToLower(replicaKind),
+						repv1alpha1.ReplicaSourceNameLabel: rep.GetName(),
+					}
+					if replicaKind == repv1alpha1.KindReplica {
+						ontoSecret.Labels[repv1alpha1.ReplicaSourceNamespaceLabel] = rep.GetNamespace()
+					}
+					Expect(env.Client("openmcp-system/workload-cluster").Update(env.Ctx, ontoSecret)).To(Succeed())
+
+					nextToSecret := &corev1.Secret{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "openmcp-system", Name: "source-secret"}, nextToSecret)).To(Succeed())
+					nextToSecret.Labels = map[string]string{
+						openmcpconst.ManagedByLabel:        providerName,
+						repv1alpha1.ReplicaSourceKindLabel: strings.ToLower(replicaKind),
+						repv1alpha1.ReplicaSourceNameLabel: rep.GetName(),
+					}
+					if replicaKind == repv1alpha1.KindReplica {
+						nextToSecret.Labels[repv1alpha1.ReplicaSourceNamespaceLabel] = rep.GetNamespace()
+					}
+					Expect(env.Client(platformCluster).Update(env.Ctx, nextToSecret)).To(Succeed())
+
+					// Delete the Cluster resource (deletion timestamp set; the test finalizer blocks actual removal).
+					workloadCluster := &clustersv1alpha1.Cluster{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "openmcp-system", Name: "workload-cluster"}, workloadCluster)).To(Succeed())
+					Expect(env.Client(platformCluster).Delete(env.Ctx, workloadCluster)).To(Succeed())
+
+					// First reconcile: both copies deleted from their respective clusters, but references still in replica status
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					Expect(env.Client("openmcp-system/workload-cluster").Get(env.Ctx, client.ObjectKey{Namespace: "test-ns", Name: "source-secret"}, ontoSecret)).
+						To(MatchError(apierrors.IsNotFound, "IsNotFound"))
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "openmcp-system", Name: "source-secret"}, nextToSecret)).
+						To(MatchError(apierrors.IsNotFound, "IsNotFound"))
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-cluster-delete", replicaKind)
+					Expect(rep.GetStatus().Replicas).To(ContainElements(
+						repv1alpha1.CreatedResourcesWithType{
+							Type: metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+							Resources: []repv1alpha1.CreatedResource{
+								{
+									ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{Name: "source-secret", Namespace: "test-ns"},
+									Cluster:                              &commonapi.ObjectReference{Name: "workload-cluster", Namespace: "openmcp-system"},
+								},
+								{
+									ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{Name: "source-secret", Namespace: "openmcp-system"},
+								},
+							},
+						},
+					))
+
+					// Second reconcile: resources already gone, status references cleared
+					_, err = ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-cluster-delete", replicaKind)
+					Expect(rep.GetStatus().Replicas).To(BeEmpty())
+				})
+
+				It("should not delete the shared NextTo copy when only one of two clusters in the same namespace is deleted", func() {
+					env, _, ctrl := defaultTestSetup(withClusterReplicas, "testdata", "test-05")
+
+					rep := getReplicaEquivalent(env, "test-ns", "test-replica-nextto-shared", replicaKind)
+
+					// Set management labels on the shared NextTo copy.
+					nextToSecret := &corev1.Secret{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "openmcp-system", Name: "source-secret"}, nextToSecret)).To(Succeed())
+					nextToSecret.Labels = map[string]string{
+						openmcpconst.ManagedByLabel:        providerName,
+						repv1alpha1.ReplicaSourceKindLabel: strings.ToLower(replicaKind),
+						repv1alpha1.ReplicaSourceNameLabel: rep.GetName(),
+					}
+					if replicaKind == repv1alpha1.KindReplica {
+						nextToSecret.Labels[repv1alpha1.ReplicaSourceNamespaceLabel] = rep.GetNamespace()
+					}
+					Expect(env.Client(platformCluster).Update(env.Ctx, nextToSecret)).To(Succeed())
+
+					// Delete cluster-a (deletion timestamp set; the test finalizer blocks actual removal).
+					clusterA := &clustersv1alpha1.Cluster{}
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "openmcp-system", Name: "workload-cluster-a"}, clusterA)).To(Succeed())
+					Expect(env.Client(platformCluster).Delete(env.Ctx, clusterA)).To(Succeed())
+
+					_, err := ctrl.Reconcile(env.Ctx, mcreconcile.Request{Request: testutils.RequestFromObject(rep)})
+					Expect(err).ToNot(HaveOccurred())
+
+					// The NextTo copy must still exist because cluster-b still requires it.
+					Expect(env.Client(platformCluster).Get(env.Ctx, client.ObjectKey{Namespace: "openmcp-system", Name: "source-secret"}, nextToSecret)).To(Succeed())
+					Expect(nextToSecret.DeletionTimestamp.IsZero()).To(BeTrue(), "shared NextTo copy should not be deleted while still required by another cluster")
+
+					rep = getReplicaEquivalent(env, "test-ns", "test-replica-nextto-shared", replicaKind)
+					Expect(rep.GetStatus().Replicas).To(ContainElement(repv1alpha1.CreatedResourcesWithType{
+						Type: metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+						Resources: []repv1alpha1.CreatedResource{
+							{
+								ObjectReferenceWithOptionalNamespace: commonapi.ObjectReferenceWithOptionalNamespace{Name: "source-secret", Namespace: "openmcp-system"},
+							},
+						},
+					}))
 				})
 
 			})

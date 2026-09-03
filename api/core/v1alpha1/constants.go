@@ -57,6 +57,8 @@ const (
 
 	// ConditionReasonWaitingForManagedReplicasDeletion indicates that the controller is waiting for managed replicas to be deleted before it can proceed with deletion of the (Cluster)Replica.
 	ConditionReasonWaitingForManagedReplicasDeletion = "WaitingForManagedReplicasDeletion"
+	// ConditionReasonWaitingForResourceDeletion indicates that the controller is waiting for a managed resource to be deleted before it can proceed with deletion of the (Cluster)Replica.
+	ConditionReasonWaitingForResourceDeletion = "WaitingForResourceDeletion"
 	// ConditionReasonIdenticalCopy indicates that an identical version of the generated target resource was already created earlier by the same (Cluster)Replica, and therefore no update was necessary.
 	ConditionReasonIdenticalCopy = "IdenticalCopy"
 )
