@@ -1,0 +1,15 @@
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: ClusterReplica
+metadata:
+  name: crep-ignored
+  annotations:
+    openmcp.cloud/operation: ignore
+spec:
+  sources:
+    - id: src
+      apiVersion: v1
+      kind: ConfigMap
+      name: source-cm
+      namespace: default
+  targets:
+    - cluster: {}

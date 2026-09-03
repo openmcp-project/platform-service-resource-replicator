@@ -1,0 +1,11 @@
+apiVersion: clusters.openmcp.cloud/v1alpha1
+kind: Cluster
+metadata:
+  name: cp-01
+  namespace: user-01
+spec:
+  kubernetes: {}
+  profile: test
+  purposes:
+  - controlplane
+  tenancy: Exclusive

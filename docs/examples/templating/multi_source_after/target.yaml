@@ -1,0 +1,17 @@
+# Cluster: platform
+apiVersion: v1
+kind: Secret
+metadata:
+  name: combined
+  namespace: test-01
+  labels:
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: replica
+    replica.core.open-control-plane.io/name: combined-secret
+    replica.core.open-control-plane.io/namespace: test-01
+type: Opaque
+data:
+  password: c3VwZXJzZWNyZXQ=
+  tls.crt: LS0tLS1CRUdJTi0tLS0t
+  tls.key: LS0tLS1CRUdJTi0tLS0t

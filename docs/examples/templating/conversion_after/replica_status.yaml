@@ -1,0 +1,72 @@
+# Cluster: platform
+apiVersion: core.open-control-plane.io/v1alpha1
+kind: Replica
+metadata:
+  name: pod-reader-clusterrole
+  namespace: test-01
+  finalizers:
+  - replica.core.open-control-plane.io/finalizer
+spec:
+  sources:
+  - id: source
+    group: rbac.authorization.k8s.io
+    version: v1
+    kind: Role
+    name: pod-reader
+    namespace: infra
+  template: |
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: {{ .sources.source.metadata.name }}
+    rules:
+    {{- .sources.source.rules | toYaml | nindent 4 }}
+  targets:
+  - cluster:
+      selector:
+        matchPurposes:
+        - operator: ContainsAll
+          values:
+          - workload
+status:
+  phase: Ready
+  observedGeneration: 0
+  conditions:
+  - message: "Successfully accessed cluster 'workloads/wl-01'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_workloads.wl-01
+  - message: "Successfully accessed cluster 'workloads/wl-02'"
+    reason: TargetClusterAccess
+    status: "True"
+    type: Cluster_workloads.wl-02
+  - message: ""
+    reason: Meta_True
+    status: "True"
+    type: Meta
+  - message: "Source resource 'infra/pod-reader' (id: source) successfully read"
+    reason: SourceRead
+    status: "True"
+    type: Source_infra.pod-reader_Role.v1.rbac.authorization.k8s.io
+  - message: "Target resource 'pod-reader' (rbac.authorization.k8s.io/v1, Kind=ClusterRole) successfully synced to cluster 'workloads/wl-01'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_workloads.wl-01_pod-reader_ClusterRole.v1.rbac.authorization.k8s.io
+  - message: "Target resource 'pod-reader' (rbac.authorization.k8s.io/v1, Kind=ClusterRole) successfully synced to cluster 'workloads/wl-02'"
+    reason: TargetSynced
+    status: "True"
+    type: Target_workloads.wl-02_pod-reader_ClusterRole.v1.rbac.authorization.k8s.io
+  replicas:
+  - type:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: ClusterRole
+    resources:
+    - cluster:
+        name: wl-01
+        namespace: workloads
+      name: pod-reader
+    - cluster:
+        name: wl-02
+        namespace: workloads
+      name: pod-reader

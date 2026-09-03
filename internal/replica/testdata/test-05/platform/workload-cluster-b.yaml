@@ -1,0 +1,10 @@
+apiVersion: clusters.openmcp.cloud/v1alpha1
+kind: Cluster
+metadata:
+  name: workload-cluster-b
+  namespace: openmcp-system
+spec:
+  profile: test
+  purposes:
+  - workload
+  tenancy: Shared

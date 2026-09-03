@@ -1,0 +1,10 @@
+# Cluster: platform
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tls-cert
+  namespace: infra
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTi0tLS0t
+  tls.key: LS0tLS1CRUdJTi0tLS0t

@@ -1,0 +1,11 @@
+apiVersion: clusters.openmcp.cloud/v1alpha1
+kind: Cluster
+metadata:
+  name: onboarding
+  namespace: openmcp-system
+spec:
+  kubernetes: {}
+  profile: test
+  purposes:
+  - onboarding
+  tenancy: Shared

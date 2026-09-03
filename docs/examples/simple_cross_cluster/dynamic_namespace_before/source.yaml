@@ -1,0 +1,15 @@
+# Cluster: platform
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cryptic
+  namespace: foo
+  finalizers:
+  - foo.bar.baz/fin
+  labels:
+    app: foo
+  annotations:
+    foo.bar.baz/ann: "true"
+type: Opaque
+data:
+  password: cGFzc3dvcmQxMjM=

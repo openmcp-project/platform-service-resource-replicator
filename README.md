@@ -1,4 +1,24 @@
-# OpenControlPlane Repository Template
+# Platform Service: Resource Replicator
+
+## About the Project
+
+This repository implements a 'platform service' in the context of the [open-control-plane](open-control-plane.io) project.
+
+It reconciles `Replica` resources, as well as their cluster-scoped siblings, `ClusterReplica`s. Both specify a k8s resource which should be copied into one or more namespaces, on the same cluster and/or on other clusters.
+
+Templating allows for powerful modifications, such as changing the copied resource's `kind`, or combining multiple sources into a single one.
+
+See the [documentation](./docs/README.md) for further details.
+
+This platform service uses [multicluster-runtime](https://github.com/kubernetes-sigs/multicluster-runtime) with the [open-control-plane provider](https://github.com/openmcp-project/multicluster-provider).
+
+### Limitations
+
+The platform service resource replicator currently does neither watch the source resources it creates copies of, nor does it watch the created copies. The reason for this is the significant complexity that comes with watching arbitrary resources across multiple clusters (the platform service is already quite complex as-is).
+
+The `interval` field can be used to configure periodic reconciliation of (Cluster)Replicas, ensuring that modifications to source resources and/or their copies are handled eventually. The default is one hour.
+
+Watches for source resources or their copies might be added later on, if deemed necessary enough to outweight the increase in complexity.
 
 ## Support, Feedback, Contributing
 

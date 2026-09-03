@@ -1,0 +1,12 @@
+apiVersion: clusters.openmcp.cloud/v1alpha1
+kind: Cluster
+metadata:
+  name: workload-cluster
+  namespace: openmcp-system
+  finalizers:
+  - test/block-deletion
+spec:
+  profile: test
+  purposes:
+  - workload
+  tenancy: Shared

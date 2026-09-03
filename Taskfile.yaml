@@ -1,0 +1,71 @@
+version: 3
+
+includes:
+  shared:
+    taskfile: hack/common/Taskfile_controller.yaml
+    flatten: true
+    excludes:
+    - generate:docs
+    vars:
+      NESTED_MODULES: ""
+      API_DIRS: "{{.ROOT_DIR}}/api/..."
+      MANIFEST_OUT: "{{.ROOT_DIR}}/api/crds/manifests"
+      CODE_DIRS: "{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/..."
+      COMPONENTS: "platform-service-resource-replicator"
+      REPO_URL: "https://github.com/openmcp-project/platform-service-resource-replicator"
+      GENERATE_DOCS_INDEX: "true"
+      CHART_COMPONENTS: "[]"
+  common:
+    taskfile: hack/common/Taskfile_controller.yaml
+    internal: true
+    vars:
+      NESTED_MODULES: ""
+      API_DIRS: "{{.ROOT_DIR}}/api/..."
+      MANIFEST_OUT: "{{.ROOT_DIR}}/api/crds/manifests"
+      CODE_DIRS: "{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/..."
+      COMPONENTS: "platform-service-resource-replicator"
+      REPO_URL: "https://github.com/openmcp-project/platform-service-resource-replicator"
+      GENERATE_DOCS_INDEX: "true"
+      CHART_COMPONENTS: "[]"
+
+tasks:
+  generate:docs:
+    desc: "  Generate documentation index and embed example manifests into markdown files."
+    aliases:
+    - gen:docs
+    - g:docs
+    run: once
+    cmds:
+    - task: embed-docs
+    - task: common:generate:docs
+
+  embed-docs:
+    desc: "  Embed example manifests into markdown files. Automatically runs as part of the generate:docs task."
+    run: once
+    internal: true
+    vars:
+      example_dirs:
+        sh: '{{.ROOT_DIR}}/hack/common/unfold.sh --clean --inline {{.ROOT_DIR}}/docs/examples/...'
+    cmds:
+    - cmd: go run {{.ROOT_DIR}}/hack/embed-docs {{.example_dirs}}
+
+  platformservice:
+    desc: "  Generates a PlatformService manifest for the current version. Set the VERBOSITY env var to overwrite the default verbosity level (INFO)."
+    requires:
+      vars:
+      - VERSION
+    vars:
+      VERBOSITY:
+        sh: echo "${VERBOSITY:-INFO}"
+    cmds:
+    - cmd: |
+        cat << EOF
+        apiVersion: openmcp.cloud/v1alpha1
+        kind: PlatformService
+        metadata:
+          name: replicator
+        spec:
+          image: ghcr.io/openmcp-project/images/platform-service-resource-replicator:{{.VERSION}}
+          verbosity: {{.VERBOSITY}}
+        EOF
+      silent: true

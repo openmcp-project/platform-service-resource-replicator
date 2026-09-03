@@ -1,0 +1,17 @@
+# Cluster: platform
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cryptic
+  namespace: bar
+  labels:
+    app: foo
+    openmcp.cloud/managed-by: replica
+    replica.core.open-control-plane.io/generation: "0"
+    replica.core.open-control-plane.io/kind: clusterreplica
+    replica.core.open-control-plane.io/name: simple
+  annotations:
+    foo.bar.baz/ann: "true"
+type: Opaque
+data:
+  password: cGFzc3dvcmQxMjM=

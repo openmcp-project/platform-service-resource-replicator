@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: source-secret
+  namespace: target-ns
+type: Opaque
+data:
+  other: ZGF0YQ==

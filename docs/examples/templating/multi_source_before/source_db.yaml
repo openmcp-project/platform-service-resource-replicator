@@ -1,0 +1,12 @@
+# Cluster: platform
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: infra
+type: Opaque
+data:
+  username: YWRtaW4=
+  password: c3VwZXJzZWNyZXQ=
+  host: ZGIuaW50ZXJuYWw=
+  port: NTQzMg==
