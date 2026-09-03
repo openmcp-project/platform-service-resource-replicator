@@ -10,6 +10,8 @@ Templating allows for powerful modifications, such as changing the copied resour
 
 See the [documentation](./docs/README.md) for further details.
 
+This platform service uses [multicluster-runtime](https://github.com/kubernetes-sigs/multicluster-runtime) with the [open-control-plane provider](https://github.com/openmcp-project/multicluster-provider).
+
 ## Support, Feedback, Contributing
 
 This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/openmcp-project/repository-template/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](https://github.com/openmcp-project/.github/blob/main/CONTRIBUTING.md).
