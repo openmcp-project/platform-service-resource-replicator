@@ -7,7 +7,7 @@ includes:
     excludes:
     - generate:docs
     vars:
-      NESTED_MODULES: ""
+      NESTED_MODULES: "api"
       API_DIRS: "{{.ROOT_DIR}}/api/..."
       MANIFEST_OUT: "{{.ROOT_DIR}}/api/crds/manifests"
       CODE_DIRS: "{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/..."
@@ -19,7 +19,7 @@ includes:
     taskfile: hack/common/Taskfile_controller.yaml
     internal: true
     vars:
-      NESTED_MODULES: ""
+      NESTED_MODULES: "api"
       API_DIRS: "{{.ROOT_DIR}}/api/..."
       MANIFEST_OUT: "{{.ROOT_DIR}}/api/crds/manifests"
       CODE_DIRS: "{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/..."
