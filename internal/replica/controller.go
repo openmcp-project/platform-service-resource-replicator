@@ -35,6 +35,7 @@ import (
 
 	"github.com/openmcp-project/controller-utils/pkg/conditions"
 	ctrlutils "github.com/openmcp-project/controller-utils/pkg/controller"
+	"github.com/openmcp-project/controller-utils/pkg/controller/smartrequeue"
 	errutils "github.com/openmcp-project/controller-utils/pkg/errors"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
 	"github.com/openmcp-project/multicluster-provider/pkg/provider"
@@ -50,8 +51,7 @@ import (
 const (
 	ControllerName = "Replica"
 
-	HostingPlatformClusterNameForLogging       = "<hosting-platform-cluster>"
-	WaitingForReplicaDeletionReconcileInterval = 1 * time.Minute
+	HostingPlatformClusterNameForLogging = "<hosting-platform-cluster>"
 )
 
 func NewReplicaController(provider multicluster.Provider, providerName string, eventRecorder events.EventRecorder) *ReplicaController {
@@ -59,6 +59,7 @@ func NewReplicaController(provider multicluster.Provider, providerName string, e
 		provider:      provider,
 		providerName:  providerName,
 		eventRecorder: eventRecorder,
+		sr:            smartrequeue.NewStore(1*time.Second, 1*time.Hour, 2.0),
 	}
 }
 
@@ -66,6 +67,7 @@ type ReplicaController struct {
 	provider      multicluster.Provider
 	providerName  string
 	eventRecorder events.EventRecorder
+	sr            *smartrequeue.Store
 }
 
 var _ mcreconcile.Reconciler = &ReplicaController{}
@@ -100,6 +102,12 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Reque
 				}
 			}
 			return commonapi.StatusPhaseReady, nil
+		}).
+		WithSmartRequeue(c.sr, func(rr ctrlutils.ReconcileResult[repv1alpha1.ReplicaEquivalent]) ctrlutils.SmartRequeueAction {
+			if rr.SmartRequeue != "" {
+				return rr.SmartRequeue
+			}
+			return ctrlutils.SR_NO_REQUEUE
 		}).
 		Build().
 		UpdateStatus(ctx, platformCluster.GetClient(), rr)
@@ -686,7 +694,7 @@ func (c *ReplicaController) handleDelete(ctx context.Context, platformCluster cl
 		// Not returning an error leads to deleteObsoleteResources being called in a way which deletes all managed resources, so we don't really need to do anything here.
 		log.Info("Waiting for managed replicas to be deleted", "count", len(rr.Object.GetStatus().Replicas))
 		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, repv1alpha1.ConditionReasonWaitingForManagedReplicasDeletion, "Waiting for managed replicas to be deleted")
-		rr.Result.RequeueAfter = WaitingForReplicaDeletionReconcileInterval
+		rr.SmartRequeue = ctrlutils.SR_BACKOFF
 		return rr
 	}
 
