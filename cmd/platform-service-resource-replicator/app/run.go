@@ -235,7 +235,7 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	}
 
 	setupLog.Info("Starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(logging.NewContext(ctrl.SetupSignalHandler(), o.Log)); err != nil {
 		return fmt.Errorf("problem running manager: %w", err)
 	}
 
