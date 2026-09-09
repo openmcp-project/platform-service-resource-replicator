@@ -250,6 +250,10 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 			createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
 			return rr, nil
 		}
+	} else if len(rr.Object.GetSpec().Sources) > 1 {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("template is required when more than one source is defined"), cconst.ReasonConfigurationProblem)
+		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
+		return rr, nil
 	}
 
 	// fetch source resources
