@@ -8,7 +8,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	ctrlutils "github.com/openmcp-project/controller-utils/pkg/controller"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
@@ -70,7 +69,7 @@ func (c *ClusterHandler) clusterStateChanged(cluster *clustersv1alpha1.Cluster) 
 }
 
 // IsResponsibleFor implements [cluster.ClusterHandler].
-func (c *ClusterHandler) IsResponsibleFor(ctx context.Context, req mcreconcile.Request, platformClient client.Client, cluster *clustersv1alpha1.Cluster) bool {
+func (c *ClusterHandler) IsResponsibleFor(ctx context.Context, req reconcile.Request, platformClient client.Client, cluster *clustersv1alpha1.Cluster) bool {
 	if cluster == nil || c.selector == nil {
 		return true
 	}
@@ -78,7 +77,7 @@ func (c *ClusterHandler) IsResponsibleFor(ctx context.Context, req mcreconcile.R
 }
 
 // HandleCreateOrUpdate implements [cluster.ClusterHandler].
-func (c *ClusterHandler) HandleCreateOrUpdate(ctx context.Context, req mcreconcile.Request, platformClient client.Client, cluster *clustersv1alpha1.Cluster, access cluster.Cluster) (reconcile.Result, error) {
+func (c *ClusterHandler) HandleCreateOrUpdate(ctx context.Context, req reconcile.Request, platformClient client.Client, cluster *clustersv1alpha1.Cluster, access cluster.Cluster) (reconcile.Result, error) {
 	var err error
 	if c.clusterStateChanged(cluster) {
 		err = c.enqueueAllReplicasForCluster(ctx, platformClient, cluster)
@@ -87,12 +86,12 @@ func (c *ClusterHandler) HandleCreateOrUpdate(ctx context.Context, req mcreconci
 }
 
 // HandleDelete implements [cluster.ClusterHandler].
-func (c *ClusterHandler) HandleDelete(ctx context.Context, req mcreconcile.Request, platformClient client.Client, cluster *clustersv1alpha1.Cluster, access cluster.Cluster) (reconcile.Result, error) {
+func (c *ClusterHandler) HandleDelete(ctx context.Context, req reconcile.Request, platformClient client.Client, cluster *clustersv1alpha1.Cluster, access cluster.Cluster) (reconcile.Result, error) {
 	return reconcile.Result{}, c.enqueueAllReplicasForCluster(ctx, platformClient, cluster)
 }
 
 // AfterDeletion implements [cluster.ClusterHandler].
-func (c *ClusterHandler) AfterDeletion(ctx context.Context, req mcreconcile.Request, platformClient client.Client) (reconcile.Result, error) {
+func (c *ClusterHandler) AfterDeletion(ctx context.Context, req reconcile.Request, platformClient client.Client) (reconcile.Result, error) {
 	delete(c.clusterStates, commonapi.ObjectReference{Namespace: req.Namespace, Name: req.Name})
 	return reconcile.Result{}, nil
 }

@@ -16,8 +16,8 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	testutils "github.com/openmcp-project/controller-utils/pkg/testing"
-	"github.com/openmcp-project/multicluster-provider/pkg/provider"
 	"github.com/openmcp-project/multicluster-provider/pkg/testing/fake"
+	providerutils "github.com/openmcp-project/multicluster-provider/pkg/utils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	repv1alpha1 "github.com/openmcp-project/platform-service-resource-replicator/api/core/v1alpha1"
@@ -59,7 +59,7 @@ func defaultTestSetup(testDirPathSegments ...string) (context.Context, client.Cl
 
 	prov := fake.NewProvider()
 	ctx := testutils.NewComplexEnvironmentBuilder().Build().Ctx
-	if err := prov.Add(ctx, provider.HostingPlatformCluster, platformCluster); err != nil {
+	if err := prov.Add(ctx, providerutils.HostingPlatformCluster, platformCluster); err != nil {
 		panic(err)
 	}
 	if err := prov.Add(ctx, multicluster.ClusterName(providerClusterName), providerCluster); err != nil {
@@ -121,7 +121,7 @@ var _ = Describe("NamespaceController", Serial, func() {
 		// rep-status-match and crep-status-match have a status entry for "target-ns" on the platform cluster.
 		// rep-nomatch and crep-nomatch use "env=prod" which does not match.
 		createNamespace(ctx, platformClient, "target-ns", map[string]string{"env": "test"})
-		reconcileNamespace(ctrl, ctx, provider.HostingPlatformCluster, "target-ns")
+		reconcileNamespace(ctrl, ctx, providerutils.HostingPlatformCluster, "target-ns")
 
 		Expect(drainQueue()).To(ConsistOf(
 			"default/rep-selector-match",
@@ -137,7 +137,7 @@ var _ = Describe("NamespaceController", Serial, func() {
 		// target-ns does NOT have "env=test", so selector-based replicas are not triggered.
 		// rep-status-match and crep-status-match still have a status entry for "target-ns".
 		createNamespace(ctx, platformClient, "target-ns", map[string]string{"env": "something-else"})
-		reconcileNamespace(ctrl, ctx, provider.HostingPlatformCluster, "target-ns")
+		reconcileNamespace(ctrl, ctx, providerutils.HostingPlatformCluster, "target-ns")
 
 		Expect(drainQueue()).To(ConsistOf(
 			"default/rep-status-match",
@@ -165,7 +165,7 @@ var _ = Describe("NamespaceController", Serial, func() {
 
 		// other-ns has no labels that match any selector, and no replica has a status entry for it.
 		createNamespace(ctx, platformClient, "other-ns", nil)
-		reconcileNamespace(ctrl, ctx, provider.HostingPlatformCluster, "other-ns")
+		reconcileNamespace(ctrl, ctx, providerutils.HostingPlatformCluster, "other-ns")
 
 		Expect(drainQueue()).To(BeEmpty())
 	})

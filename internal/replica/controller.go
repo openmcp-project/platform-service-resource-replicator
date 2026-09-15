@@ -38,7 +38,7 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/controller/smartrequeue"
 	errutils "github.com/openmcp-project/controller-utils/pkg/errors"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
-	"github.com/openmcp-project/multicluster-provider/pkg/provider"
+	providerutils "github.com/openmcp-project/multicluster-provider/pkg/utils"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	cconst "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1/constants"
 	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
@@ -83,7 +83,7 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Reque
 
 	platformCluster, err := c.provider.Get(ctx, req.ClusterName)
 	if err != nil {
-		return reconcile.Result{}, errutils.WithReason(fmt.Errorf("unable to get access to platform cluster '%s': %w", req.ClusterName, err), provider.ReasonClusterAccessError)
+		return reconcile.Result{}, errutils.WithReason(fmt.Errorf("unable to get access to platform cluster '%s': %w", req.ClusterName, err), providerutils.ReasonClusterAccessError)
 	}
 
 	rr := c.reconcile(ctx, req, platformCluster)
@@ -311,9 +311,9 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 
 		for _, targetCluster := range matchedClusters {
 			// get cluster access from provider
-			clusterName := provider.ClusterNameFromCluster(targetCluster)
+			clusterName := providerutils.ClusterNameFromCluster(targetCluster)
 			logClusterName := string(clusterName)
-			if logClusterName == string(provider.HostingPlatformCluster) {
+			if logClusterName == string(providerutils.HostingPlatformCluster) {
 				logClusterName = HostingPlatformClusterNameForLogging
 			}
 			clog := log.WithValues("cluster", logClusterName)
@@ -340,7 +340,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 			} else {
 				access, err = c.provider.Get(ctx, clusterName)
 				if err != nil {
-					rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s': %w", logClusterName, err), provider.ReasonClusterAccessError)
+					rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s': %w", logClusterName, err), providerutils.ReasonClusterAccessError)
 					errs.Append(rerr)
 					createCon(ClusterCondition(clusterRef), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 					continue
@@ -858,14 +858,14 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, cluster
 	// handle deletion of the identified obsolete resources
 	errs := errutils.NewReasonableErrorList()
 	for clusterRef, resources := range resourcesToDelete {
-		clusterName := provider.ClusterNameFromReference(&clusterRef)
+		clusterName := providerutils.ClusterNameFromReference(&clusterRef)
 		logClusterName := string(clusterName)
-		if logClusterName == string(provider.HostingPlatformCluster) {
+		if logClusterName == string(providerutils.HostingPlatformCluster) {
 			logClusterName = HostingPlatformClusterNameForLogging
 		}
-		access, err := c.provider.Get(ctx, provider.ClusterNameFromReference(&clusterRef))
+		access, err := c.provider.Get(ctx, providerutils.ClusterNameFromReference(&clusterRef))
 		if err != nil {
-			rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s' to delete resources: %w", logClusterName, err), provider.ReasonClusterAccessError)
+			rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s' to delete resources: %w", logClusterName, err), providerutils.ReasonClusterAccessError)
 			errs.Append(rerr)
 			// create a condition for every resource we wanted to delete in this cluster, so that the user knows that we couldn't delete them
 			for _, res := range resources {

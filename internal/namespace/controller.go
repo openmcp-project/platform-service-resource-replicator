@@ -18,7 +18,7 @@ import (
 
 	ctrlutils "github.com/openmcp-project/controller-utils/pkg/controller"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
-	"github.com/openmcp-project/multicluster-provider/pkg/provider"
+	providerutils "github.com/openmcp-project/multicluster-provider/pkg/utils"
 	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
 
 	repv1alpha1 "github.com/openmcp-project/platform-service-resource-replicator/api/core/v1alpha1"
@@ -67,7 +67,7 @@ func (c *NamespaceController) reconcile(ctx context.Context, req mcreconcile.Req
 		return reconcile.Result{}, fmt.Errorf("unable to get Namespace '%s': %w", req.Name, err)
 	}
 
-	platformCluster, err := c.provider.Get(ctx, provider.HostingPlatformCluster)
+	platformCluster, err := c.provider.Get(ctx, providerutils.HostingPlatformCluster)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("unable to get access to platform cluster: %w", err)
 	}
@@ -138,9 +138,9 @@ func (c *NamespaceController) replicaIsRelevantForNamespaceEvent(ctx context.Con
 			if copy.Namespace != ns.Name {
 				continue
 			}
-			if clusterName == provider.HostingPlatformCluster && copy.Cluster == nil {
+			if clusterName == providerutils.HostingPlatformCluster && copy.Cluster == nil {
 				return true
-			} else if copy.Cluster != nil && provider.ClusterName(copy.Cluster.Namespace, copy.Cluster.Name) == clusterName {
+			} else if copy.Cluster != nil && providerutils.ClusterName(copy.Cluster.Namespace, copy.Cluster.Name) == clusterName {
 				return true
 			}
 		}
