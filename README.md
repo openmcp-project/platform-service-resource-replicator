@@ -14,11 +14,17 @@ This platform service uses [multicluster-runtime](https://github.com/kubernetes-
 
 ### Limitations
 
+#### Watching Source/Target Resources
+
 The platform service resource replicator currently does neither watch the source resources it creates copies of, nor does it watch the created copies. The reason for this is the significant complexity that comes with watching arbitrary resources across multiple clusters (the platform service is already quite complex as-is).
 
 The `interval` field can be used to configure periodic reconciliation of (Cluster)Replicas, ensuring that modifications to source resources and/or their copies are handled eventually. The default is one hour.
 
 Watches for source resources or their copies might be added later on, if deemed necessary enough to outweight the increase in complexity.
+
+#### AccessRequest Permissions
+
+The permissions of the `AccessRequest`s used to access the different clusters are currently not updated dynamically. Since the required permissions can change dynamically, the platform service requests cluster admin privileges for all `Cluster`s instead.
 
 ## Support, Feedback, Contributing
 
