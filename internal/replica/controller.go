@@ -88,6 +88,10 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Reque
 
 	rr := c.reconcile(ctx, req, platformCluster)
 
+	generationChanged := false
+	if rr.Object != nil {
+		generationChanged = rr.Object.GetGeneration() != rr.Object.GetStatus().ObservedGeneration
+	}
 	res, err := ctrlutils.NewOpenMCPStatusUpdaterBuilder[repv1alpha1.ReplicaEquivalent]().
 		WithNestedStruct("Status").
 		WithConditionUpdater(false).
@@ -104,8 +108,16 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Reque
 			return commonapi.StatusPhaseReady, nil
 		}).
 		WithSmartRequeue(c.sr, func(rr ctrlutils.ReconcileResult[repv1alpha1.ReplicaEquivalent]) ctrlutils.SmartRequeueAction {
-			if rr.SmartRequeue != "" {
-				return rr.SmartRequeue
+			// We use the smart requeue here only when waiting for resources to be deleted.
+			for _, con := range rr.Object.GetStatus().Conditions {
+				if con.Reason == repv1alpha1.ConditionReasonWaitingForResourceDeletion || con.Reason == repv1alpha1.ConditionReasonWaitingForManagedReplicasDeletion {
+					if generationChanged {
+						// if something changed, reset the interval
+						return ctrlutils.SR_RESET
+					}
+					// otherwise, requeue with backoff
+					return ctrlutils.SR_BACKOFF
+				}
 			}
 			return ctrlutils.SR_NO_REQUEUE
 		}).
@@ -587,7 +599,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 								}
 								tlog.Info("Created namespace in target cluster", "namespace", ns.Name)
 							case repv1alpha1.NamespacePolicySkip:
-								tlog.Info("Skipping target resource because target namespace does not exist", "namespace", ns.Name)
+								tlog.Info("Skipping target resource because target namespace does not exist")
 								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target namespace '%s' in cluster '%s' does not exist, skipping", ns.Name, logClusterName))
 								continue
 							case repv1alpha1.NamespacePolicyFail:
@@ -604,7 +616,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 								continue
 							case repv1alpha1.NamespacePolicySkip:
-								tlog.Info("Skipping target resource because target namespace is being deleted", "namespace", ns.Name)
+								tlog.Info("Skipping target resource because target namespace is being deleted")
 								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target namespace '%s' in cluster '%s' is being deleted, skipping", ns.Name, logClusterName))
 								continue
 							}
@@ -698,7 +710,6 @@ func (c *ReplicaController) handleDelete(ctx context.Context, platformCluster cl
 		// Not returning an error leads to deleteObsoleteResources being called in a way which deletes all managed resources, so we don't really need to do anything here.
 		log.Info("Waiting for managed replicas to be deleted", "count", len(rr.Object.GetStatus().Replicas))
 		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, repv1alpha1.ConditionReasonWaitingForManagedReplicasDeletion, "Waiting for managed replicas to be deleted")
-		rr.SmartRequeue = ctrlutils.SR_BACKOFF
 		return rr
 	}
 
