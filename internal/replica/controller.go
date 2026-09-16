@@ -806,6 +806,7 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, cluster
 				rr.ConditionsToRemove = append(rr.ConditionsToRemove, TargetCondition(clusterRef, res))
 				rr.Object.GetStatus().Replicas.RemoveRaw(res.GroupVersionKind, res.Namespace, res.Name, &clusterRef)
 			}
+			rr.ConditionsToRemove = append(rr.ConditionsToRemove, ClusterCondition(clusterRef))
 			delete(resourcesToDelete, clusterRef)
 		}
 	}
