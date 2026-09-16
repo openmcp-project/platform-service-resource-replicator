@@ -944,8 +944,8 @@ func wrapTemplateError(err error, template string, input map[string]any, output 
 
 func (c *ReplicaController) SetupWithMulticlusterManager(mgr mcmanager.Manager) error {
 	return mcbuilder.ControllerManagedBy(mgr).
-		For(&repv1alpha1.Replica{}, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithPredicates(replicaPredicates())).
-		Watches(&repv1alpha1.ClusterReplica{}, mchandler.EnqueueRequestForObject, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithPredicates(replicaPredicates())).
+		For(&repv1alpha1.Replica{}, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithEngageWithProviderClusters(false), mcbuilder.WithPredicates(replicaPredicates())).
+		Watches(&repv1alpha1.ClusterReplica{}, mchandler.EnqueueRequestForObject, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithEngageWithProviderClusters(false), mcbuilder.WithPredicates(replicaPredicates())).
 		WatchesRawSource(source.TypedChannel(shared.SharedInformation().GetReplicaNotificationChannel(), &handler.TypedFuncs[client.Object, mcreconcile.Request]{
 			// for some reason, using mchandler.TypedEnqueueRequestForObject here does not work, so we have to implement the function ourselves
 			GenericFunc: func(ctx context.Context, tge event.TypedGenericEvent[client.Object], trli workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
