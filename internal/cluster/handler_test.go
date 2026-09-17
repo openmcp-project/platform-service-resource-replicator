@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
-	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	testutils "github.com/openmcp-project/controller-utils/pkg/testing"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
@@ -66,7 +66,7 @@ func makeCluster(namespace, name string, labels map[string]string) *clustersv1al
 // invokeHandler calls HandleCreateOrUpdate on the handler with the given platform client and cluster.
 func invokeHandler(handler *clusterhandler.ClusterHandler, ctx context.Context, platformClient client.Client, clusterObj *clustersv1alpha1.Cluster) {
 	GinkgoHelper()
-	req := mcreconcile.Request{}
+	req := reconcile.Request{}
 	_, err := handler.HandleCreateOrUpdate(ctx, req, platformClient, clusterObj, nil)
 	Expect(err).ToNot(HaveOccurred())
 }
@@ -74,7 +74,7 @@ func invokeHandler(handler *clusterhandler.ClusterHandler, ctx context.Context, 
 // invokeDeleteHandler calls HandleDelete on the handler.
 func invokeDeleteHandler(handler *clusterhandler.ClusterHandler, ctx context.Context, platformClient client.Client, clusterObj *clustersv1alpha1.Cluster) {
 	GinkgoHelper()
-	req := mcreconcile.Request{}
+	req := reconcile.Request{}
 	_, err := handler.HandleDelete(ctx, req, platformClient, clusterObj, nil)
 	Expect(err).ToNot(HaveOccurred())
 }
@@ -169,7 +169,7 @@ var _ = Describe("ClusterHandler", Serial, func() {
 		handler := clusterhandler.New(sel)
 		cl := makeCluster("ns-a", "cluster-a", map[string]string{"env": "test"})
 
-		Expect(handler.IsResponsibleFor(ctx, mcreconcile.Request{}, nil, cl)).To(BeFalse())
+		Expect(handler.IsResponsibleFor(ctx, reconcile.Request{}, nil, cl)).To(BeFalse())
 	})
 
 	It("IsResponsibleFor returns true when the handler-level selector matches the cluster", func() {
@@ -182,7 +182,7 @@ var _ = Describe("ClusterHandler", Serial, func() {
 		handler := clusterhandler.New(sel)
 		cl := makeCluster("ns-a", "cluster-a", map[string]string{"env": "test"})
 
-		Expect(handler.IsResponsibleFor(ctx, mcreconcile.Request{}, nil, cl)).To(BeTrue())
+		Expect(handler.IsResponsibleFor(ctx, reconcile.Request{}, nil, cl)).To(BeTrue())
 	})
 
 	It("IsResponsibleFor returns true when the handler-level selector is nil", func() {
@@ -190,6 +190,6 @@ var _ = Describe("ClusterHandler", Serial, func() {
 		handler := clusterhandler.New(nil)
 		cl := makeCluster("ns-a", "cluster-a", map[string]string{"env": "anything"})
 
-		Expect(handler.IsResponsibleFor(ctx, mcreconcile.Request{}, nil, cl)).To(BeTrue())
+		Expect(handler.IsResponsibleFor(ctx, reconcile.Request{}, nil, cl)).To(BeTrue())
 	})
 })

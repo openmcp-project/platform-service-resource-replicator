@@ -38,7 +38,7 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/controller/smartrequeue"
 	errutils "github.com/openmcp-project/controller-utils/pkg/errors"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
-	"github.com/openmcp-project/multicluster-provider/pkg/provider"
+	providerutils "github.com/openmcp-project/multicluster-provider/pkg/utils"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	cconst "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1/constants"
 	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
@@ -83,11 +83,15 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Reque
 
 	platformCluster, err := c.provider.Get(ctx, req.ClusterName)
 	if err != nil {
-		return reconcile.Result{}, errutils.WithReason(fmt.Errorf("unable to get access to platform cluster '%s': %w", req.ClusterName, err), provider.ReasonClusterAccessError)
+		return reconcile.Result{}, errutils.WithReason(fmt.Errorf("unable to get access to platform cluster '%s': %w", req.ClusterName, err), providerutils.ReasonClusterAccessError)
 	}
 
 	rr := c.reconcile(ctx, req, platformCluster)
 
+	generationChanged := false
+	if rr.Object != nil {
+		generationChanged = rr.Object.GetGeneration() != rr.Object.GetStatus().ObservedGeneration
+	}
 	res, err := ctrlutils.NewOpenMCPStatusUpdaterBuilder[repv1alpha1.ReplicaEquivalent]().
 		WithNestedStruct("Status").
 		WithConditionUpdater(false).
@@ -104,8 +108,16 @@ func (c *ReplicaController) Reconcile(ctx context.Context, req mcreconcile.Reque
 			return commonapi.StatusPhaseReady, nil
 		}).
 		WithSmartRequeue(c.sr, func(rr ctrlutils.ReconcileResult[repv1alpha1.ReplicaEquivalent]) ctrlutils.SmartRequeueAction {
-			if rr.SmartRequeue != "" {
-				return rr.SmartRequeue
+			// We use the smart requeue here only when waiting for resources to be deleted.
+			for _, con := range rr.Object.GetStatus().Conditions {
+				if con.Reason == repv1alpha1.ConditionReasonWaitingForResourceDeletion || con.Reason == repv1alpha1.ConditionReasonWaitingForManagedReplicasDeletion {
+					if generationChanged {
+						// if something changed, reset the interval
+						return ctrlutils.SR_RESET
+					}
+					// otherwise, requeue with backoff
+					return ctrlutils.SR_BACKOFF
+				}
 			}
 			return ctrlutils.SR_NO_REQUEUE
 		}).
@@ -250,6 +262,10 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 			createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
 			return rr, nil
 		}
+	} else if len(rr.Object.GetSpec().Sources) > 1 {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("template is required when more than one source is defined"), cconst.ReasonConfigurationProblem)
+		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
+		return rr, nil
 	}
 
 	// fetch source resources
@@ -295,9 +311,9 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 
 		for _, targetCluster := range matchedClusters {
 			// get cluster access from provider
-			clusterName := provider.ClusterNameFromCluster(targetCluster)
+			clusterName := providerutils.ClusterNameFromCluster(targetCluster)
 			logClusterName := string(clusterName)
-			if logClusterName == string(provider.HostingPlatformCluster) {
+			if logClusterName == string(providerutils.HostingPlatformCluster) {
 				logClusterName = HostingPlatformClusterNameForLogging
 			}
 			clog := log.WithValues("cluster", logClusterName)
@@ -324,7 +340,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 			} else {
 				access, err = c.provider.Get(ctx, clusterName)
 				if err != nil {
-					rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s': %w", logClusterName, err), provider.ReasonClusterAccessError)
+					rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s': %w", logClusterName, err), providerutils.ReasonClusterAccessError)
 					errs.Append(rerr)
 					createCon(ClusterCondition(clusterRef), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 					continue
@@ -583,7 +599,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 								}
 								tlog.Info("Created namespace in target cluster", "namespace", ns.Name)
 							case repv1alpha1.NamespacePolicySkip:
-								tlog.Info("Skipping target resource because target namespace does not exist", "namespace", ns.Name)
+								tlog.Info("Skipping target resource because target namespace does not exist")
 								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target namespace '%s' in cluster '%s' does not exist, skipping", ns.Name, logClusterName))
 								continue
 							case repv1alpha1.NamespacePolicyFail:
@@ -600,7 +616,7 @@ func (c *ReplicaController) handleCreateOrUpdate(ctx context.Context, platformCl
 								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionFalse, rerr.Reason(), rerr.Error())
 								continue
 							case repv1alpha1.NamespacePolicySkip:
-								tlog.Info("Skipping target resource because target namespace is being deleted", "namespace", ns.Name)
+								tlog.Info("Skipping target resource because target namespace is being deleted")
 								createCon(TargetCondition(clusterRef, commonapi.TypedReferenceFromObject(rendered)), metav1.ConditionTrue, repv1alpha1.ConditionReasonTargetSkipped, fmt.Sprintf("Target namespace '%s' in cluster '%s' is being deleted, skipping", ns.Name, logClusterName))
 								continue
 							}
@@ -694,7 +710,6 @@ func (c *ReplicaController) handleDelete(ctx context.Context, platformCluster cl
 		// Not returning an error leads to deleteObsoleteResources being called in a way which deletes all managed resources, so we don't really need to do anything here.
 		log.Info("Waiting for managed replicas to be deleted", "count", len(rr.Object.GetStatus().Replicas))
 		createCon(repv1alpha1.ConditionTypeMeta, metav1.ConditionFalse, repv1alpha1.ConditionReasonWaitingForManagedReplicasDeletion, "Waiting for managed replicas to be deleted")
-		rr.SmartRequeue = ctrlutils.SR_BACKOFF
 		return rr
 	}
 
@@ -802,6 +817,7 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, cluster
 				rr.ConditionsToRemove = append(rr.ConditionsToRemove, TargetCondition(clusterRef, res))
 				rr.Object.GetStatus().Replicas.RemoveRaw(res.GroupVersionKind, res.Namespace, res.Name, &clusterRef)
 			}
+			rr.ConditionsToRemove = append(rr.ConditionsToRemove, ClusterCondition(clusterRef))
 			delete(resourcesToDelete, clusterRef)
 		}
 	}
@@ -842,14 +858,14 @@ func (c *ReplicaController) deleteObsoleteResources(ctx context.Context, cluster
 	// handle deletion of the identified obsolete resources
 	errs := errutils.NewReasonableErrorList()
 	for clusterRef, resources := range resourcesToDelete {
-		clusterName := provider.ClusterNameFromReference(&clusterRef)
+		clusterName := providerutils.ClusterNameFromReference(&clusterRef)
 		logClusterName := string(clusterName)
-		if logClusterName == string(provider.HostingPlatformCluster) {
+		if logClusterName == string(providerutils.HostingPlatformCluster) {
 			logClusterName = HostingPlatformClusterNameForLogging
 		}
-		access, err := c.provider.Get(ctx, provider.ClusterNameFromReference(&clusterRef))
+		access, err := c.provider.Get(ctx, providerutils.ClusterNameFromReference(&clusterRef))
 		if err != nil {
-			rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s' to delete resources: %w", logClusterName, err), provider.ReasonClusterAccessError)
+			rerr := errutils.WithReason(fmt.Errorf("unable to get access to target cluster '%s' to delete resources: %w", logClusterName, err), providerutils.ReasonClusterAccessError)
 			errs.Append(rerr)
 			// create a condition for every resource we wanted to delete in this cluster, so that the user knows that we couldn't delete them
 			for _, res := range resources {
@@ -940,8 +956,8 @@ func wrapTemplateError(err error, template string, input map[string]any, output 
 
 func (c *ReplicaController) SetupWithMulticlusterManager(mgr mcmanager.Manager) error {
 	return mcbuilder.ControllerManagedBy(mgr).
-		For(&repv1alpha1.Replica{}, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithPredicates(replicaPredicates())).
-		Watches(&repv1alpha1.ClusterReplica{}, mchandler.EnqueueRequestForObject, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithPredicates(replicaPredicates())).
+		For(&repv1alpha1.Replica{}, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithEngageWithProviderClusters(false), mcbuilder.WithPredicates(replicaPredicates())).
+		Watches(&repv1alpha1.ClusterReplica{}, mchandler.EnqueueRequestForObject, mcbuilder.WithEngageWithLocalCluster(true), mcbuilder.WithEngageWithProviderClusters(false), mcbuilder.WithPredicates(replicaPredicates())).
 		WatchesRawSource(source.TypedChannel(shared.SharedInformation().GetReplicaNotificationChannel(), &handler.TypedFuncs[client.Object, mcreconcile.Request]{
 			// for some reason, using mchandler.TypedEnqueueRequestForObject here does not work, so we have to implement the function ourselves
 			GenericFunc: func(ctx context.Context, tge event.TypedGenericEvent[client.Object], trli workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {

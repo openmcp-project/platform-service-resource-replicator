@@ -373,14 +373,11 @@ spec:
                       - purposes: spec.purposes of the Cluster resource.
                     - namespace: Namespace of the target resource. Only available if a namespace selector is specified in the target definition; not set if the namespace is computed by the template itself.
                   - replica: Metadata information about this Replica resource. Contains fields for name, namespace, labels, and annotations.
-                type: object
+                x-kubernetes-preserve-unknown-fields: true
             required:
             - sources
             - targets
             type: object
-            x-kubernetes-validations:
-            - message: template is required when sources has more than one entry
-              rule: has(self.template) || size(self.sources) == 1
           status:
             properties:
               conditions:

@@ -22,8 +22,8 @@ import (
 
 	errutils "github.com/openmcp-project/controller-utils/pkg/errors"
 	testutils "github.com/openmcp-project/controller-utils/pkg/testing"
-	"github.com/openmcp-project/multicluster-provider/pkg/provider"
 	"github.com/openmcp-project/multicluster-provider/pkg/testing/fake"
+	providerutils "github.com/openmcp-project/multicluster-provider/pkg/utils"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	cconst "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1/constants"
 	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
@@ -98,7 +98,7 @@ func defaultTestSetup(withClusterReplicas bool, testDataDirPathSegments ...strin
 			if len(parts) != 2 {
 				Fail("cluster directory name does not follow the 'cluster_<namespace>_<name>' convention: " + name)
 			}
-			cName := provider.ClusterName(parts[0], parts[1])
+			cName := providerutils.ClusterName(parts[0], parts[1])
 			envb.WithFakeClient(string(cName), scheme)
 			envb.WithInitObjectPath(string(cName), dirPath)
 		}
@@ -132,7 +132,7 @@ func defaultTestSetup(withClusterReplicas bool, testDataDirPathSegments ...strin
 	for name, cl := range env.Clusters {
 		cName := multicluster.ClusterName(name)
 		if name == platformCluster {
-			cName = provider.HostingPlatformCluster
+			cName = providerutils.HostingPlatformCluster
 		}
 		Expect(prov.Add(env.Ctx, cName, fake.NewCluster(scheme, fake.WithClient(cl)))).To(Succeed())
 	}

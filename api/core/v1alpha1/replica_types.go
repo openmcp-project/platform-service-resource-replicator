@@ -13,6 +13,7 @@ import (
 // RawTemplate can be unmarshaled from either a JSON string or a JSON object/array.
 // When unmarshaled from an object/array, the original JSON is preserved so that it
 // can be marshaled back into the same form instead of a plain string.
+// +kubebuilder:validation:XPreserveUnknownFields
 type RawTemplate struct {
 	// value is the YAML string used by the template engine.
 	value string `json:"-"`
@@ -56,7 +57,6 @@ func (t RawTemplate) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.value)
 }
 
-// +kubebuilder:validation:XValidation:rule="has(self.template) || size(self.sources) == 1",message="template is required when sources has more than one entry"
 type ReplicaSpec struct {
 	// Sources is a list of references to the resources which should be combined into the replica.
 	// +kubebuilder:validation:MinItems=1
@@ -85,6 +85,8 @@ type ReplicaSpec struct {
 	//   - namespace: Namespace of the target resource. Only available if a namespace selector is specified in the target definition; not set if the namespace is computed by the template itself.
 	// - replica: Metadata information about this Replica resource. Contains fields for name, namespace, labels, and annotations.
 	//
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
 	Template *RawTemplate `json:"template,omitempty"`
 

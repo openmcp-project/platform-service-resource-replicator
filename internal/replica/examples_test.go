@@ -17,8 +17,8 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	testutils "github.com/openmcp-project/controller-utils/pkg/testing"
-	"github.com/openmcp-project/multicluster-provider/pkg/provider"
 	"github.com/openmcp-project/multicluster-provider/pkg/testing/fake"
+	providerutils "github.com/openmcp-project/multicluster-provider/pkg/utils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	repv1alpha1 "github.com/openmcp-project/platform-service-resource-replicator/api/core/v1alpha1"
@@ -97,7 +97,7 @@ func exampleTestSetup(exampleDirPrefix, exampleName, envSetupDir string) (*testu
 					if len(objects) != 1 {
 						Fail("expected exactly one Cluster object in file " + filepath.Join(envSetupDir, file.Name()))
 					}
-					cName := provider.ClusterName(objects[0].GetNamespace(), objects[0].GetName())
+					cName := providerutils.ClusterName(objects[0].GetNamespace(), objects[0].GetName())
 					clusterMappings[strings.TrimSuffix(cFileName, ".yaml")] = cName
 					envb.WithFakeClient(string(cName), scheme)
 				}
@@ -133,7 +133,7 @@ func exampleTestSetup(exampleDirPrefix, exampleName, envSetupDir string) (*testu
 	for name, cl := range env.Clusters {
 		cName := multicluster.ClusterName(name)
 		if name == platformCluster {
-			cName = provider.HostingPlatformCluster
+			cName = providerutils.HostingPlatformCluster
 		}
 		Expect(prov.Add(env.Ctx, cName, fake.NewCluster(scheme, fake.WithClient(cl)))).To(Succeed())
 	}
