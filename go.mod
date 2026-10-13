@@ -7,7 +7,7 @@ replace github.com/openmcp-project/platform-service-resource-replicator/api => .
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/google/go-cmp v0.7.0
-	github.com/onsi/ginkgo/v2 v2.32.1
+	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
 	github.com/openmcp-project/controller-utils v0.31.1-0.20260825092024-c4d1028b6ea2
 	github.com/openmcp-project/multicluster-provider v0.2.0
